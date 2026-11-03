@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Counselling Planner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#F3F4F1;--surface:#FFFFFF;--surface2:#F8F9F7;--ink:#13231D;--ink2:#2E3D37;--muted:#64716B;--line:#DCE1DD;--line2:#EAEDEA;
+  --accent:#0F6B47;--accent-h:#0B5A3B;--accent-ink:#FFFFFF;--accent-soft:#E3EFE8;--brass:#A6761A;--brass-soft:#F5EBD3;--danger:#A8322A;--danger-soft:#F8E4E1;
+  --c0:#D7EADD;--c1:#DBE4F1;--c2:#F0E5CD;--c3:#E6DCEF;--c4:#F1DBDF;--c5:#D5EAE9;
+  --sh1:0 1px 2px rgba(19,35,29,.06);--sh2:0 10px 30px -12px rgba(19,35,29,.22);
+  --sans:"Instrument Sans",system-ui,-apple-system,"Segoe UI",Arial,sans-serif;--serif:"Newsreader",Georgia,"Times New Roman",serif;
+  box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0D1411;--surface:#141D19;--surface2:#18231E;--ink:#E7EDEA;--ink2:#C9D3CE;--muted:#93A19A;--line:#27332E;--line2:#1F2A25;
+  --accent:#55C08A;--accent-h:#6FD09F;--accent-ink:#06210F;--accent-soft:#16352A;--brass:#E2B04F;--brass-soft:#382B10;--danger:#F08A7E;--danger-soft:#3A1916;
+  --c0:#1B3527;--c1:#1B2A3E;--c2:#382E19;--c3:#2D2440;--c4:#3B1F27;--c5:#173434;--sh1:none;--sh2:0 12px 32px -12px rgba(0,0,0,.6);color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0D1411;--surface:#141D19;--surface2:#18231E;--ink:#E7EDEA;--ink2:#C9D3CE;--muted:#93A19A;--line:#27332E;--line2:#1F2A25;
+  --accent:#55C08A;--accent-h:#6FD09F;--accent-ink:#06210F;--accent-soft:#16352A;--brass:#E2B04F;--brass-soft:#382B10;--danger:#F08A7E;--danger-soft:#3A1916;
+  --c0:#1B3527;--c1:#1B2A3E;--c2:#382E19;--c3:#2D2440;--c4:#3B1F27;--c5:#173434;--sh1:none;--sh2:0 12px 32px -12px rgba(0,0,0,.6);color-scheme:dark}
+*{box-sizing:border-box}
+html{scroll-padding-top:calc(env(safe-area-inset-top,0px) + 130px)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.55;font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--surface)}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.hide{display:none!important}
+.muted{color:var(--muted)}
+
+/* Header + stepper */
+.appbar{position:sticky;top:env(safe-area-inset-top,0px);z-index:6;background:var(--surface);border-bottom:1px solid var(--line)}
+.bar{max-width:1440px;margin:0 auto;display:flex;align-items:center;gap:14px;padding:12px 28px}
+.mark{width:34px;height:34px;border-radius:9px;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;font-family:var(--serif);font-size:21px;font-weight:600;flex:none}
+.brand{display:flex;flex-direction:column;line-height:1.15;margin-right:auto;min-width:0}
+.brand b{font-weight:600;font-size:16px;letter-spacing:-.005em}
+.brand span{color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stepper{max-width:1440px;margin:0 auto;padding:0 28px;display:flex;gap:6px;overflow-x:auto;scrollbar-width:none}
+.stepper::-webkit-scrollbar{display:none}
+.stepper ol{list-style:none;display:flex;margin:0;padding:0;counter-reset:s;gap:0}
+.stepper li{counter-increment:s;display:flex;align-items:center}
+.stepper li+li::before{content:"";width:28px;height:1px;background:var(--line);margin:0 4px}
+.stepper button{display:flex;align-items:center;gap:10px;border:0;background:none;padding:12px 10px 13px;cursor:pointer;color:var(--muted);font-weight:600;font-size:14px;white-space:nowrap;border-bottom:2px solid transparent}
+.stepper button::before{content:counter(s);width:24px;height:24px;border-radius:50%;border:1.5px solid var(--line);display:grid;place-items:center;font-size:12.5px;font-weight:700;background:var(--surface)}
+.stepper button.done::before{content:"✓";border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+.stepper button.on{color:var(--ink);border-bottom-color:var(--accent)}
+.stepper button.on::before{border-color:var(--accent);background:var(--accent);color:var(--accent-ink)}
+
+/* Buttons & inputs */
+.btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--surface);border-radius:9px;padding:8px 14px;cursor:pointer;font-weight:600;font-size:14px;line-height:1.3;color:var(--ink);transition:background .15s,border-color .15s}
+.btn:hover{border-color:var(--muted);background:var(--surface2)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.primary:hover{background:var(--accent-h);border-color:var(--accent-h)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.sm{padding:5px 10px;font-size:13px;border-radius:8px}
+.btn.ghost{border-color:transparent;background:transparent}
+.btn.ghost:hover{background:var(--surface2)}
+.btn.danger{color:var(--danger)}
+.icon-btn{width:36px;height:36px;padding:0;justify-content:center}
+.input,select.input,textarea.input{border:1px solid var(--line);border-radius:9px;padding:8px 11px;background:var(--surface);min-width:0;transition:border-color .15s}
+.input:hover{border-color:var(--muted)}
+.input:focus{border-color:var(--accent);outline:none;box-shadow:0 0 0 3px var(--accent-soft)}
+.input.sm{padding:5px 9px;font-size:14px}
+label.f{display:block;font-size:13px;font-weight:600;color:var(--ink2);margin:0 0 5px}
+.toggle{position:relative;display:inline-block;width:38px;height:22px;flex:none}
+.toggle input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;z-index:1}
+.toggle span{position:absolute;inset:0;border-radius:999px;background:var(--line);transition:background .15s}
+.toggle span::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:var(--surface);box-shadow:var(--sh1);transition:transform .15s}
+.toggle input:checked+span{background:var(--accent)}
+.toggle input:checked+span::after{transform:translateX(16px)}
+.toggle input:focus-visible+span{outline:2px solid var(--accent);outline-offset:2px}
+.optline{display:flex;gap:12px;align-items:flex-start;padding:12px 0;border-top:1px solid var(--line2)}
+.optline:first-child{border-top:0;padding-top:0}
+.optline b{display:block;font-weight:600}
+.optline .muted{font-size:13.5px}
+
+/* Page */
+main{max-width:1440px;margin:0 auto;padding:34px 28px 80px}
+.pagehead{display:flex;gap:16px;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;margin-bottom:22px}
+.pagehead>div:first-child{flex:1 1 380px;min-width:0}
+h1{font-family:var(--serif);font-weight:500;font-size:38px;line-height:1.1;letter-spacing:-.015em;margin:0 0 8px}
+.lead{color:var(--muted);margin:0;max-width:68ch;font-size:15.5px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--sh1)}
+.section{display:grid;grid-template-columns:minmax(0,300px) minmax(0,1fr);gap:28px;padding:26px 28px;border-top:1px solid var(--line2)}
+.section:first-child{border-top:0}
+.section h2{font-family:var(--serif);font-weight:500;font-size:22px;line-height:1.2;margin:0 0 6px}
+.section .desc{color:var(--muted);font-size:14px;margin:0}
+.section .desc+.desc{margin-top:8px}
+.badge{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:2px 10px;font-size:12.5px;font-weight:600;background:var(--surface2);border:1px solid var(--line)}
+.badge.warn{background:var(--brass-soft);border-color:transparent;color:var(--brass)}
+.badge.ok{background:var(--accent-soft);border-color:transparent;color:var(--accent)}
+.chips{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.chip{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:5px 6px 5px 13px;font-weight:600;font-size:14px;border:1px solid transparent}
+.chip button{border:0;background:none;cursor:pointer;color:var(--muted);font-size:17px;line-height:1;padding:0 5px;border-radius:50%}
+.chip button:hover{color:var(--danger)}
+.addrow{display:inline-flex;gap:6px}
+.notice{border-radius:11px;padding:12px 16px;margin:0 0 16px;font-size:14.5px;border:1px solid transparent}
+.notice.w{background:var(--brass-soft);color:var(--ink)}
+.notice.e{background:var(--danger-soft)}
+.notice.i{background:var(--accent-soft)}
+.notice ul{margin:6px 0 0;padding-left:20px}
+.notice b{font-weight:600}
+
+/* Upload */
+.uploads{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:18px}
+.drop{position:relative;display:flex;flex-direction:column;gap:8px;padding:26px;border-radius:14px;border:1.5px dashed var(--line);background:var(--surface);cursor:pointer;transition:border-color .15s,background .15s;min-height:210px}
+.drop:hover,.drop.over{border-color:var(--accent);background:var(--surface2)}
+.drop.loaded{border-style:solid}
+.drop input{position:absolute;width:1px;height:1px;opacity:0}
+.drop h3{font-family:var(--serif);font-weight:500;font-size:23px;margin:0}
+.drop p{margin:0;color:var(--muted);font-size:14px;max-width:52ch}
+.drop .status{margin-top:auto;padding-top:14px;border-top:1px solid var(--line2);font-size:14px}
+.drop .status b{font-weight:600}
+.fileic{width:40px;height:40px;border-radius:10px;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center}
+
+/* Tables */
+.tbl{overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+table{border-collapse:separate;border-spacing:0;width:100%;font-size:14px}
+th,td{padding:9px 12px;border-bottom:1px solid var(--line2);text-align:left;vertical-align:middle;white-space:nowrap}
+th{position:sticky;top:0;background:var(--surface2);font-weight:600;font-size:13px;color:var(--muted);border-bottom:1px solid var(--line);z-index:1}
+tbody tr:hover td{background:var(--surface2)}
+tbody tr:last-child td{border-bottom:0}
+tr.flag td:first-child{box-shadow:inset 3px 0 0 var(--brass)}
+td .input{width:100%}
+.num{text-align:right}
+
+/* Rules */
+.rules{display:flex;flex-direction:column;gap:12px}
+.rule{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:14px 16px;display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px 14px;align-items:start}
+.rule.off{opacity:.6}
+.rule .order{font-family:var(--serif);font-size:22px;line-height:1;color:var(--muted);width:26px;text-align:center;padding-top:6px}
+.rule .body{display:flex;flex-direction:column;gap:9px;min-width:0}
+.rule .sent{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:14.5px;color:var(--ink2)}
+.rule .sent .input{max-width:100%}
+.rule .name{font-weight:600;border-color:transparent;padding-left:0;font-size:15.5px;width:100%}
+.rule .name:hover{border-color:var(--line);padding-left:11px}
+.rule .name:focus{padding-left:11px}
+.rule .acts{display:flex;gap:4px;align-items:center}
+
+/* Schedule */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:1px;border:1px solid var(--line);border-radius:14px;background:var(--line2);margin-bottom:22px;overflow:hidden}
+.kpi{padding:18px 22px;background:var(--surface)}
+.kpi b{display:block;font-family:var(--serif);font-weight:500;font-size:40px;line-height:1;letter-spacing:-.02em}
+.kpi span{color:var(--muted);font-size:13.5px}
+.tabs{display:flex;gap:2px;margin:0 0 18px;padding:4px;background:var(--surface2);border:1px solid var(--line);border-radius:11px;width:max-content;max-width:100%;overflow-x:auto}
+.tabs button{border:0;background:none;padding:7px 14px;cursor:pointer;font-weight:600;font-size:14px;color:var(--muted);border-radius:8px;white-space:nowrap}
+.tabs button.on{background:var(--surface);color:var(--ink);box-shadow:var(--sh1)}
+.legend{display:flex;gap:20px;flex-wrap:wrap;color:var(--muted);font-size:13px;margin:0 0 12px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:7px;vertical-align:0}
+.boardwrap{overflow-x:auto;border:1px solid var(--line);border-radius:14px;background:var(--surface);box-shadow:var(--sh1)}
+.board{display:grid;grid-template-columns:76px repeat(6,minmax(178px,1fr));min-width:1170px}
+.board .dh{padding:14px 12px 12px;border-bottom:1px solid var(--line);border-left:1px solid var(--line2)}
+.board .dh:first-child{border-left:0}
+.board .dh b{display:block;font-family:var(--serif);font-weight:500;font-size:20px;line-height:1.1}
+.board .dh small{color:var(--muted);font-size:12.5px}
+.board .sh{padding:12px 12px;border-bottom:1px solid var(--line2);display:flex;flex-direction:column;gap:1px;background:var(--surface2)}
+.board .sh b{font-weight:700;font-size:15px}
+.board .sh small{color:var(--muted);font-size:12px}
+.board .cell{border-left:1px solid var(--line2);border-bottom:1px solid var(--line2);padding:8px;display:flex;flex-direction:column;gap:6px}
+.tile{position:relative;display:grid;grid-template-columns:28px minmax(0,1fr) auto;gap:0 8px;align-items:center;padding:7px 9px 7px 7px;border-radius:9px;border:1px solid transparent;text-align:left;cursor:pointer;width:100%;transition:box-shadow .15s,transform .15s}
+.tile:hover{box-shadow:var(--sh2);transform:translateY(-1px)}
+.tile .cab{grid-row:span 2;width:28px;height:28px;border-radius:7px;background:var(--surface);display:grid;place-items:center;font-size:12px;font-weight:700;color:var(--ink2)}
+.tile .who{font-weight:700;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tile .who small{font-weight:500;color:var(--ink2);font-size:12.5px}
+.tile .n{grid-row:span 2;min-width:28px;height:24px;padding:0 8px;border-radius:999px;background:var(--surface);display:grid;place-items:center;font-weight:700;font-size:13px}
+.tile .meta{font-size:12px;color:var(--ink2);opacity:.85;line-height:1.35}
+.tile.moved{border-color:var(--brass)}
+.tile.moved .meta b{color:var(--brass);font-weight:700}
+.tile.manual{border-color:var(--accent)}
+.tile.free{display:block;cursor:default;border:1px dashed var(--line);background:transparent;color:var(--muted);font-size:12.5px;padding:7px 10px}
+.tile.free:hover{box-shadow:none;transform:none}
+.empty{padding:48px 32px;text-align:center}
+.setup{display:grid;grid-template-columns:190px minmax(0,1fr);gap:32px;align-items:start}
+.toc{position:sticky;top:calc(env(safe-area-inset-top,0px) + 132px)}
+.toc ul{list-style:none;margin:0;padding:0;border-left:1px solid var(--line)}
+.toc a{display:block;padding:6px 0 6px 14px;margin-left:-1px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;font-size:14px;font-weight:500}
+.toc a:hover{color:var(--ink);border-left-color:var(--muted)}
+.toc a.on{color:var(--accent);border-left-color:var(--accent);font-weight:600}
+.group{margin-bottom:40px;scroll-margin-top:calc(env(safe-area-inset-top,0px) + 130px)}
+.section{scroll-margin-top:calc(env(safe-area-inset-top,0px) + 130px)}
+.gh{font-family:var(--serif);font-weight:500;font-size:28px;line-height:1.15;margin:0 0 4px;letter-spacing:-.01em}
+.gd{color:var(--muted);margin:0 0 16px;font-size:14.5px}
+.setup .section{grid-template-columns:minmax(0,230px) minmax(0,1fr);gap:24px}
+.setup .rule .sent input.input{width:130px!important}
+.calcbar{position:sticky;bottom:calc(14px + env(safe-area-inset-bottom,0px));display:flex;gap:16px;align-items:center;justify-content:space-between;padding:14px 20px;box-shadow:var(--sh2);flex-wrap:wrap}
+.calcbar b{display:block;font-weight:600}
+.calcbar span{font-size:14px}
+.empty h2{font-family:var(--serif);font-weight:500;font-size:26px;margin:0 0 6px}
+
+/* Sheet (edit panel) */
+dialog.sheet{margin:0 0 0 auto;height:100%;max-height:100%;width:min(440px,100vw);border:0;border-left:1px solid var(--line);padding:0;background:var(--surface);color:var(--ink);box-shadow:var(--sh2)}
+dialog.sheet[open]{animation:slidein .22s ease-out}
+@keyframes slidein{from{transform:translateX(30px);opacity:.4}to{transform:none;opacity:1}}
+dialog::backdrop{background:rgba(9,18,14,.38)}
+dialog form{display:flex;flex-direction:column;height:100%}
+.sheet .hd{padding:calc(22px + env(safe-area-inset-top,0px)) 24px 16px;border-bottom:1px solid var(--line2)}
+.sheet .hd h3{font-family:var(--serif);font-weight:500;font-size:26px;margin:0}
+.sheet .bd{padding:20px 24px;overflow:auto;flex:1;display:flex;flex-direction:column;gap:16px}
+.sheet .ft{padding:14px 24px calc(14px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--line2);display:flex;gap:8px;justify-content:space-between}
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.grid3 .input{width:100%}
+.check{border-radius:10px;padding:12px 14px;background:var(--surface2);font-size:14px}
+.toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translate(-50%,8px);background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:10px;font-weight:600;font-size:14px;z-index:50;opacity:0;transition:opacity .2s,transform .2s;pointer-events:none}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.busy{position:fixed;inset:0;background:rgba(9,18,14,.3);display:none;place-items:center;z-index:40;backdrop-filter:blur(2px)}
+.busy.show{display:grid}
+.busy div{background:var(--surface);padding:18px 26px;border-radius:12px;font-weight:600;border:1px solid var(--line);box-shadow:var(--sh2);display:flex;gap:12px;align-items:center}
+.spin{width:18px;height:18px;border-radius:50%;border:2px solid var(--line);border-top-color:var(--accent);animation:sp 0.8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+.scrollbox{max-height:440px}
+@media (max-width:1080px){ .setup{grid-template-columns:minmax(0,1fr)} .toc{display:none} }
+@media (max-width:900px){
+  .section{grid-template-columns:minmax(0,1fr);gap:14px;padding:22px 18px}
+  .bar,.stepper{padding-left:16px;padding-right:16px}
+  main{padding:24px 16px 70px}
+  h1{font-size:30px}
+  .kpi{padding:14px 16px}.kpi b{font-size:30px}
+  .brand span{display:none}
+}
+@media (max-width:640px){ .rule{grid-template-columns:auto minmax(0,1fr)} .rule .acts{grid-column:2} .rule .sent select.input,.rule .sent input.input{width:100%!important} }
+@media (max-width:520px){ .grid3{grid-template-columns:1fr 1fr} .calc-label{display:none} }
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<header class="appbar">
+  <div class="bar">
+    <div class="mark" aria-hidden="true">C</div>
+    <div class="brand"><b>Counselling Planner</b><span id="weekLabel">No week loaded</span></div>
+    <button class="btn ghost icon-btn" id="themeBtn" type="button" aria-label="Switch between light and dark">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    <button class="btn primary" id="calcBtn" type="button" disabled><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 21v-5h5"/></svg><span class="calc-label" id="calcLabel">Calculate schedule</span></button>
+  </div>
+  <nav class="stepper" aria-label="Steps"><ol>
+    <li><button type="button" data-step="0">Set up</button></li>
+    <li><button type="button" data-step="1">Weekly schedule</button></li>
+  </ol></nav>
+</header>
+<main id="main"></main>
+<dialog id="dlg" class="sheet" aria-labelledby="dlgTitle"><form method="dialog" id="dlgForm"></form></dialog>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<div class="busy" id="busy"><div><span class="spin" aria-hidden="true"></span><span id="busyText">Working…</span></div></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<script>/*ENGINE*/</script>
+<script>
+const MASTER = /*DEFAULTS*/;
+const E = window.MCSEngine;
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const KEY = 'mcs_planner_settings_v1', EDITKEY = 'mcs_planner_edits_v1';
+const CABCOL = ['--c0', '--c1', '--c2', '--c3', '--c4', '--c5'];
+const SHIFT_NOTE = { M1: 'Morning period 1', M2: 'Morning period 2', M3: 'Morning period 3', E1: 'Evening period 1', E2: 'Evening period 2', E3: 'Evening period 3' };
+const T_TYPES = [['all', 'any teacher'], ['class', 'a teacher of class'], ['codes', 'one of these teachers'], ['subject', 'a teacher of subject']];
+const S_TYPES = [['taught', 'students in batches they teach'], ['group', 'students of the same class group'], ['class', 'students of class'], ['batches', 'students in these batches'], ['prefix', 'students in batches starting with'], ['any', 'any free student']];
+const ICON = {
+  up: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m6 15 6-6 6 6"/></svg>',
+  down: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>',
+  del: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>',
+  file: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></svg>',
+  plus: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
+  dl: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14"/></svg>'
+};
+
+/* ---------- state ---------- */
+const st = { step: 0, view: 'board', settings: null, tt: null, ttName: '', records: null, recMeta: null, recName: '', students: null,
+  plan: null, moves: [], planWarnings: [], result: null, excluded: new Set(), search: '' };
+
+function loadSettings() {
+  const d = E.defaultSettings(MASTER);
+  try {
+    const s = JSON.parse(localStorage.getItem(KEY) || 'null');
+    if (s) return Object.assign(d, s, { shifts: Object.assign(d.shifts, s.shifts || {}), checks: Object.assign(d.checks, s.checks || {}),
+      counselShifts: Object.assign(d.counselShifts, s.counselShifts || {}), autoMoveShifts: Object.assign(d.autoMoveShifts, s.autoMoveShifts || {}),
+      rules: Array.isArray(s.rules) && s.rules.length ? s.rules : d.rules });
+  } catch (e) {}
+  return d;
+}
+function saveSettings() { try { localStorage.setItem(KEY, JSON.stringify(st.settings)); } catch (e) { toast('Settings could not be saved in this browser.'); } }
+const idb = {
+  open() { return new Promise((res, rej) => { if (!window.indexedDB) return rej(new Error('no idb')); const r = indexedDB.open('mcs_planner', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); },
+  async set(k, v) { try { const db = await this.open(); await new Promise((res, rej) => { const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').put(v, k); tx.oncomplete = res; tx.onerror = () => rej(tx.error); }); } catch (e) {} },
+  async get(k) { try { const db = await this.open(); return await new Promise((res, rej) => { const r = db.transaction('kv').objectStore('kv').get(k); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); } catch (e) { return undefined; } },
+  async del(k) { try { const db = await this.open(); await new Promise(res => { const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').delete(k); tx.oncomplete = res; }); } catch (e) {} }
+};
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), 2600); }
+function busy(on, msg) { $('busyText').textContent = msg || 'Working…'; $('busy').classList.toggle('show', !!on); }
+const nextFrame = () => new Promise(r => setTimeout(r, 30));
+const shifts = () => E.activeShifts(st.settings);
+const dayDate = d => st.settings.weekStart ? E.addDays(st.settings.weekStart, E.DAYS.indexOf(d)) : '';
+const fmtDate = iso => iso ? iso.slice(8, 10) + '/' + iso.slice(5, 7) + '/' + iso.slice(0, 4) : '';
+const fmtShort = iso => { if (!iso) return ''; const d = new Date(iso + 'T00:00:00Z'); return d.getUTCDate() + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()]; };
+const tName = t => (st.settings.teachers[t] && st.settings.teachers[t].name) || t;
+const tSub = t => (st.settings.teachers[t] && st.settings.teachers[t].subject) || '';
+const tCls = t => (st.settings.teachers[t] && st.settings.teachers[t].cls) || '';
+const toS = t => { const m = /^(\d{1,2}):(\d{2})/.exec(t || ''); return m ? m[1] * 3600 + m[2] * 60 : 0; };
+const toggle = (id, on, label, extra = '') => `<label class="toggle"><input type="checkbox" id="${id}" ${on ? 'checked' : ''} aria-label="${esc(label)}" ${extra}><span></span></label>`;
+
+/* ---------- files ---------- */
+function readWorkbook(file) {
+  return new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => { try { res(XLSX.read(new Uint8Array(fr.result), { type: 'array', cellDates: true, dense: true })); } catch (e) { rej(new Error('This file could not be read as Excel. Save it as .xlsx and try again.')); } };
+    fr.onerror = () => rej(new Error('The file could not be opened.'));
+    fr.readAsArrayBuffer(file);
+  });
+}
+const rowsOf = ws => XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: true });
+async function onTimetable(file) {
+  busy(true, 'Reading the timetable…'); await nextFrame();
+  try {
+    const wb = await readWorkbook(file); let tt = null, lastErr = null;
+    for (const n of wb.SheetNames) { try { tt = E.parseTimetable(rowsOf(wb.Sheets[n])); break; } catch (e) { lastErr = e; } }
+    if (!tt) throw lastErr;
+    st.tt = tt; st.ttName = file.name; if (tt.weekStart) st.settings.weekStart = tt.weekStart;
+    saveSettings(); await idb.set('tt', { tt, name: file.name }); rebuildStudents(); resetSchedule(); toast('Timetable loaded');
+  } catch (e) { alert(e.message); }
+  busy(false); render();
+}
+async function onStudents(file) {
+  busy(true, 'Reading student data. Large files take a few seconds…'); await nextFrame();
+  try {
+    const wb = await readWorkbook(file);
+    const p = E.parseStudents(wb.SheetNames.map(n => ({ name: n, rows: rowsOf(wb.Sheets[n]) })), Object.keys(st.settings.teachers));
+    if (!p.records.length) throw new Error('No student rows found. Each sheet needs columns for Roll No., Student Name and Batch (plus Date and Counsellor for history).');
+    st.records = p.records.map(r => ({ ...r, date: r.date ? r.date.toISOString().slice(0, 10) : null })); st.recMeta = p.used; st.recName = file.name;
+    await idb.set('rec', { recs: st.records, meta: p.used, name: file.name }); rebuildStudents(); resetSchedule(); toast('Student data loaded');
+  } catch (e) { alert(e.message); }
+  busy(false); render();
+}
+function rebuildStudents() { st.students = st.records ? E.buildStudents(st.records.map(r => ({ ...r, date: r.date ? new Date(r.date + 'T00:00:00Z') : null })), st.settings.weekStart) : null; }
+async function importRoomList(file) {
+  const wb = await readWorkbook(file); let n = 0;
+  for (const name of wb.SheetNames) {
+    const rows = rowsOf(wb.Sheets[name]);
+    for (let r = 0; r < Math.min(rows.length, 5); r++) {
+      const h = (rows[r] || []).map(v => String(v || '').trim().toLowerCase()); const bi = h.indexOf('batch'), gi = h.findIndex(x => x.startsWith('building'));
+      if (bi < 0 || gi < 0) continue;
+      for (let i = r + 1; i < rows.length; i++) { const b = String((rows[i] || [])[bi] || '').trim(), g = String((rows[i] || [])[gi] || '').trim(); if (b && g) { st.settings.batchBuildings[b] = g; n++; } }
+      break;
+    }
+  }
+  changed(); toast(n ? `${n} batch buildings imported` : 'No Batch and Building columns found');
+}
+async function importTeachers(file) {
+  const wb = await readWorkbook(file); let n = 0;
+  for (const name of wb.SheetNames) {
+    const rows = rowsOf(wb.Sheets[name]);
+    for (let r = 0; r < Math.min(rows.length, 5); r++) {
+      const h = (rows[r] || []).map(v => String(v || '').trim().toLowerCase());
+      const ci = h.findIndex(x => x.includes('short')), ni = h.findIndex(x => x.includes('full name') || x === 'name' || x === 'teacher name');
+      if (ci < 0 || ni < 0) continue;
+      const si = h.findIndex(x => x.includes('sub dep') || x === 'subject'), ki = h.findIndex(x => x === 'class');
+      for (let i = r + 1; i < rows.length; i++) {
+        const row = rows[i] || []; const code = String(row[ci] || '').trim(); if (!code) continue; const old = st.settings.teachers[code] || {};
+        st.settings.teachers[code] = { name: String(row[ni] || old.name || '').trim(), subject: si >= 0 ? String(row[si] || old.subject || '').trim() : (old.subject || ''), cls: ki >= 0 && row[ki] ? String(row[ki]).trim() : (old.cls || '') }; n++;
+      }
+      break;
+    }
+  }
+  changed(); toast(n ? `${n} teachers imported` : 'No Short Code and Full Name columns found');
+}
+
+/* ---------- calculation ---------- */
+function resetSchedule() { st.plan = null; st.result = null; st.moves = []; st.planWarnings = []; }
+const ready = () => !!(st.tt && st.students && st.settings.cabins.filter(Boolean).length && st.settings.weekStart && shifts().length);
+async function calculate() {
+  if (!ready()) return;
+  busy(true, 'Calculating the week…'); await nextFrame();
+  try {
+    rebuildStudents(); const bp = E.buildPlan(st.tt, st.settings);
+    st.plan = bp.plan; st.moves = bp.moves; st.planWarnings = bp.warnings; st.excluded = new Set();
+    assign(); st.step = 1; st.view = 'board'; scrollTo(0, 0); persistEdits(); toast('Schedule calculated');
+  } catch (e) { alert('Calculation failed: ' + e.message); console.error(e); }
+  busy(false); render();
+}
+function assign() {
+  st.plan = E.finalizePlan(st.plan, st.tt, st.settings);
+  st.result = E.assignStudents(st.plan, st.tt, st.settings, new Map([...st.students].filter(([k]) => !st.excluded.has(k))));
+  st.result.invalid = E.validatePlan(st.plan, st.tt, st.settings);
+}
+function persistEdits() { try { localStorage.setItem(EDITKEY, JSON.stringify({ week: st.settings.weekStart, plan: st.plan, moves: st.moves, planWarnings: st.planWarnings, excluded: [...st.excluded] })); } catch (e) {} }
+function restoreEdits() {
+  try { const e = JSON.parse(localStorage.getItem(EDITKEY) || 'null');
+    if (e && e.week === st.settings.weekStart && e.plan && st.tt && st.students) { st.plan = e.plan; st.moves = e.moves || []; st.planWarnings = e.planWarnings || []; st.excluded = new Set(e.excluded || []); assign(); } } catch (x) {}
+}
+function changed(redraw = true) { saveSettings(); if (st.plan) { assign(); persistEdits(); } if (redraw) render(); }
+
+/* ---------- render ---------- */
+function render() {
+  const s = st.settings;
+  $('weekLabel').textContent = s.weekStart ? `Week of ${fmtShort(s.weekStart)} – ${fmtShort(E.addDays(s.weekStart, 5))} ${s.weekStart.slice(0, 4)}` : 'No week loaded';
+  $('calcBtn').disabled = !ready(); $('calcLabel').textContent = st.plan ? 'Recalculate' : 'Calculate schedule';
+  document.querySelectorAll('.stepper button').forEach(b => {
+    const i = +b.dataset.step; b.classList.toggle('on', i === st.step);
+    b.classList.toggle('done', i !== st.step && ((i === 0 && ready()) || (i === 1 && !!st.plan)));
+    if (i === st.step) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current');
+  });
+  const y = window.scrollY;
+  $('main').innerHTML = [viewSetup, viewSchedule][st.step]();
+  bind(); if (st.step === 0) { window.scrollTo(0, y); markToc(); }
+}
+const head = (title, lead, right = '') => `<div class="pagehead"><div><h1>${title}</h1><p class="lead">${lead}</p></div>${right ? `<div style="display:flex;gap:8px;flex-wrap:wrap">${right}</div>` : ''}</div>`;
+const section = (title, desc, body, id = '') => `<section class="section"${id ? ` id="${id}"` : ''}><div><h2>${title}</h2>${[].concat(desc).map(d => `<p class="desc">${d}</p>`).join('')}</div><div style="min-width:0">${body}</div></section>`;
+
+function viewUpload() {
+  const tt = st.tt, rc = st.recMeta, kw = st.settings.keyword.toLowerCase();
+  const counsel = tt ? tt.entries.filter(e => (e.room + ' ' + e.subj).toLowerCase().includes(kw)).length : 0;
+  return `<div class="uploads">
+    <label class="drop ${tt ? 'loaded' : ''}" data-drop="tt"><input type="file" accept=".xlsx,.xls" id="ttFile">
+      <span class="fileic">${ICON.file}</span><h3>Faculty timetable</h3>
+      <p>Excel with “Teacher, M1 … E3” for each day, and two rows per teacher: the subject, then the batch or room.</p>
+      <div class="status">${tt ? `<span class="badge ok">Loaded</span> <b>${esc(st.ttName)}</b><br><span class="muted">${tt.teachers.length} teachers · ${counsel} counselling cells${tt.weekStart ? ` · week of ${fmtShort(tt.weekStart)}` : ''}</span>` : '<span class="muted">Choose a file or drop it here</span>'}</div></label>
+    <label class="drop ${rc ? 'loaded' : ''}" data-drop="rec"><input type="file" accept=".xlsx,.xls" id="recFile">
+      <span class="fileic">${ICON.file}</span><h3>Students and counselling history</h3>
+      <p>Any sheets with Roll No., Student Name and Batch. Date and Counsellor columns are read as past counselling.</p>
+      <div class="status">${rc ? `<span class="badge ok">Loaded</span> <b>${esc(st.recName)}</b><br><span class="muted">${st.students ? st.students.size.toLocaleString() : 0} students from ${rc.map(u => esc(u.sheet)).join(', ')}</span>` : '<span class="muted">Choose a file or drop it here</span>'}</div></label>
+  </div>
+  ${tt && tt.warnings.length ? `<div class="notice w" style="margin-top:16px"><b>Timetable notes</b><ul>${tt.warnings.map(w => `<li>${esc(w)}</li>`).join('')}</ul></div>` : ''}
+  ${tt || rc ? '<div style="margin-top:14px"><button class="btn ghost danger sm" type="button" id="clearData">Remove uploaded files</button></div>' : ''}`;
+}
+
+function viewWeek() {
+  const s = st.settings;
+  const cab = `<div class="chips">${s.cabins.map((c, i) => `<span class="chip" style="background:var(${CABCOL[i % 6]})">Cabin ${esc(c)}<button type="button" data-delcab="${i}" aria-label="Remove cabin ${esc(c)}">×</button></span>`).join('')}
+    <span class="addrow"><input class="input sm" id="newCab" placeholder="Cabin no." style="width:110px" aria-label="New cabin number"><button class="btn sm" type="button" id="addCab">${ICON.plus}Add</button></span></div>`;
+  const week = `<label class="f" for="weekStart">Monday of the week</label><input class="input" type="date" id="weekStart" value="${esc(s.weekStart)}">`;
+  const per = `<div class="tbl"><table><thead><tr><th>Period</th><th>Use for counselling</th><th>Auto-move here</th><th>Start</th><th>End</th><th class="num">Per student</th></tr></thead><tbody>
+    ${E.SLOTS.map(sh => { const on = !!s.counselShifts[sh], len = (toS(s.shifts[sh][1]) - toS(s.shifts[sh][0])) / s.baseStudents;
+      return `<tr><td><b>${sh}</b> <span class="muted">${SHIFT_NOTE[sh]}</span></td><td>${toggle('use_' + sh, on, 'Use ' + sh + ' for counselling', `data-use="${sh}"`)}</td>
+      <td>${toggle('mv_' + sh, on && s.autoMoveShifts[sh], 'Allow automatic moves into ' + sh, `data-mv="${sh}" ${on ? '' : 'disabled'}`)}</td>
+      <td><input class="input sm" type="time" data-shift="${sh}" data-i="0" value="${s.shifts[sh][0]}" aria-label="${sh} start"></td><td><input class="input sm" type="time" data-shift="${sh}" data-i="1" value="${s.shifts[sh][1]}" aria-label="${sh} end"></td>
+      <td class="num">${len > 0 ? `${Math.floor(len / 60)} min ${Math.round(len % 60)} s` : '—'}</td></tr>`; }).join('')}</tbody></table></div>
+    <div style="margin-top:16px"><label class="f" for="base">Students per slot, before building reductions</label><input class="input" type="number" min="1" max="30" id="base" value="${s.baseStudents}" style="width:120px"></div>`;
+  return `<div class="card">${section('Counselling cabins', ['One teacher per cabin per slot.', 'When a period has more teachers than cabins, extra slots move to a free cabin where the teacher has no class.'], cab, 'sec-cabins')}
+    ${section('Week', 'Read from the timetable title when possible. Counselling before this date counts as history.', week)}
+    ${section('Periods', ['Choose which periods can hold counselling. M1 and E1 are off by default.', '“Use for counselling” schedules timetable counselling cells in that period and lets you add slots there. “Auto-move here” lets the planner move overflow slots into it.', s.counselShifts.M1 || s.counselShifts.E1 ? '<span class="badge warn">Check the M1 and E1 times match your timetable.</span>' : ''], per)}</div>`;
+}
+
+function viewRules() {
+  const s = st.settings;
+  const tRows = Object.entries(s.teachers).sort((a, b) => a[0] < b[0] ? -1 : 1), bRows = Object.entries(s.batchBuildings).sort((a, b) => a[0] < b[0] ? -1 : 1);
+  const missingT = st.tt ? st.tt.teachers.filter(t => !s.teachers[t]) : [];
+  const usedRooms = st.tt ? [...new Set(st.tt.entries.map(e => e.room).filter(r => r && !/dbt|doubt|counsel/i.test(r)))] : [];
+  const missingB = usedRooms.filter(r => !s.batchBuildings[r] && !s.knownBuildings.includes(r.split(/\s+/)[0]));
+  const needT = r => ['class', 'codes', 'subject'].includes(r.tType), needS = r => ['class', 'batches', 'prefix'].includes(r.sType);
+  const ph = { class: '11th, Target', codes: 'SHG, NKB', subject: 'Physics', batches: 'XA1, XD2', prefix: 'XG, XH' };
+  const rules = `<div class="rules">${s.rules.map((r, i) => `<div class="rule ${r.on ? '' : 'off'}" data-rule="${i}">
+      <div class="order" aria-hidden="true">${i + 1}</div>
+      <div class="body"><input class="input name" data-rf="name" value="${esc(r.name)}" aria-label="Rule name" placeholder="Rule name">
+        <div class="sent"><span>When the slot belongs to</span><select class="input sm" data-rf="tType" aria-label="Which teachers">${T_TYPES.map(([k, l]) => `<option value="${k}" ${r.tType === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+          ${needT(r) ? `<input class="input sm" data-rf="tValue" value="${esc(r.tValue)}" placeholder="${ph[r.tType]}" style="width:150px" aria-label="Teacher value">` : ''}</div>
+        <div class="sent"><span>fill seats with</span><select class="input sm" data-rf="sType" aria-label="Which students">${S_TYPES.map(([k, l]) => `<option value="${k}" ${r.sType === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+          ${needS(r) ? `<input class="input sm" data-rf="sValue" value="${esc(r.sValue)}" placeholder="${ph[r.sType]}" style="width:150px" aria-label="Student value">` : ''}</div></div>
+      <div class="acts">${toggle('ron' + i, r.on, 'Rule on', `data-ron="${i}"`)}
+        <button class="btn ghost icon-btn" type="button" data-rmove="${i}" data-d="-1" aria-label="Move rule up" ${i ? '' : 'disabled'}>${ICON.up}</button>
+        <button class="btn ghost icon-btn" type="button" data-rmove="${i}" data-d="1" aria-label="Move rule down" ${i < s.rules.length - 1 ? '' : 'disabled'}>${ICON.down}</button>
+        <button class="btn ghost icon-btn danger" type="button" data-rdel="${i}" aria-label="Delete rule">${ICON.del}</button></div></div>`).join('')}</div>
+    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button class="btn" type="button" id="addRule">${ICON.plus}Add rule</button><button class="btn ghost" type="button" id="resetRules">Restore default rules</button></div>`;
+  const cons = `<div class="optline">${toggle('optRepeat', s.noRepeatTeacher, 'Always a different teacher')}<div><b>Always a different teacher</b><span class="muted">Skip students this teacher has counselled before.</span></div></div>
+    <div class="optline">${toggle('optMove', s.moveOverflow, 'Move slots when cabins are full')}<div><b>Move slots when cabins are full</b><span class="muted">Same day first, then the nearest day, only where the teacher has no class.</span></div></div>
+    <div class="optline"><input class="input sm" type="number" min="0" max="365" id="gap" value="${s.minGapDays || 0}" style="width:76px" aria-label="Minimum days between counselling"><div><b>Days before a student can be counselled again</b><span class="muted">0 means no limit. Students counselled more recently are skipped.</span></div></div>
+    <div class="optline" style="display:block"><label class="f" for="cg">Teacher classes that share students</label><input class="input" id="cg" value="${esc(s.classGroups)}" style="width:min(380px,100%)"><div class="muted" style="font-size:13.5px;margin-top:4px">Separate groups with |. Used by “students of the same class group”.</div></div>
+    <div class="optline" style="display:block"><label class="f" for="kw">Word that marks a counselling cell in the timetable</label><input class="input" id="kw" value="${esc(s.keyword)}" style="width:220px"></div>`;
+  const red = `<label class="f">Buildings that reduce the count</label>
+    <div class="chips" style="margin-bottom:18px">${s.reduceBuildings.map((b, i) => `<span class="chip" style="background:var(--surface2);border-color:var(--line)">${esc(b)}<button type="button" data-delred="${i}" aria-label="Remove ${esc(b)}">×</button></span>`).join('')}
+      <span class="addrow"><input class="input sm" id="newRed" placeholder="Building" style="width:120px" aria-label="Building name"><button class="btn sm" type="button" id="addRed">${ICON.plus}Add</button></span></div>
+    <label class="f">Neighbouring period checked for each counselling period</label>
+    <div class="tbl" style="max-width:480px"><table><thead><tr><th>Period</th><th>Before</th><th>After</th></tr></thead><tbody>
+      ${E.SLOTS.map(sh => `<tr><td><b>${sh}</b>${s.counselShifts[sh] ? '' : ' <span class="muted">off</span>'}</td>${['before', 'after'].map(k => `<td><select class="input sm" data-chk="${sh}" data-k="${k}" aria-label="${sh} ${k}"><option value="">None</option>${E.SLOTS.filter(x => x !== sh).map(x => `<option ${s.checks[sh][k] === x ? 'selected' : ''}>${x}</option>`).join('')}</select></td>`).join('')}</tr>`).join('')}
+    </tbody></table></div>`;
+  const teach = `${missingT.length ? `<div class="notice w">In the timetable but not in this list: <b>${missingT.map(esc).join(', ')}</b>. Add them so they get a name and a class.</div>` : ''}
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"><input class="input sm" id="tFilter" placeholder="Find a teacher" style="width:200px" aria-label="Find a teacher">
+      <button class="btn sm" type="button" id="addT">${ICON.plus}Add teacher</button><label class="btn sm" style="cursor:pointer">Import from Excel<input type="file" accept=".xlsx,.xls" id="impT" class="hide"></label></div>
+    <div class="tbl scrollbox"><table id="tTable"><thead><tr><th>Code</th><th>Full name</th><th>Subject</th><th>Class</th><th></th></tr></thead><tbody>
+      ${tRows.map(([c, t]) => `<tr data-t="${esc(c)}"><td><b>${esc(c)}</b></td><td><input class="input sm" data-tf="name" value="${esc(t.name)}" aria-label="Name of ${esc(c)}"></td><td><input class="input sm" data-tf="subject" value="${esc(t.subject)}" style="width:110px" aria-label="Subject of ${esc(c)}"></td>
+        <td><select class="input sm" data-tf="cls" aria-label="Class of ${esc(c)}">${['', '11th', '12th', 'Target'].concat(t.cls && !['11th', '12th', 'Target'].includes(t.cls) ? [t.cls] : []).map(o => `<option ${t.cls === o ? 'selected' : ''} value="${esc(o)}">${o || '—'}</option>`).join('')}</select></td>
+        <td><button class="btn ghost icon-btn danger" type="button" data-delt="${esc(c)}" aria-label="Remove ${esc(c)}">${ICON.del}</button></td></tr>`).join('')}</tbody></table></div>`;
+  const bld = `${missingB.length ? `<div class="notice w">No building for <b>${missingB.slice(0, 50).map(esc).join(', ')}${missingB.length > 50 ? '…' : ''}</b>. Classes in these batches never reduce the count.</div>` : ''}
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"><input class="input sm" id="bFilter" placeholder="Find a batch" style="width:200px" aria-label="Find a batch">
+      <button class="btn sm" type="button" id="addB">${ICON.plus}Add batch</button><label class="btn sm" style="cursor:pointer">Import room list<input type="file" accept=".xlsx,.xls" id="impB" class="hide"></label></div>
+    <div class="tbl scrollbox" style="max-width:520px"><table id="bTable"><thead><tr><th>Batch</th><th>Building</th><th></th></tr></thead><tbody>
+      ${bRows.map(([b, g]) => `<tr data-b="${esc(b)}"><td><b>${esc(b)}</b></td><td><input class="input sm" data-bf value="${esc(g)}" list="bldList" aria-label="Building of ${esc(b)}"></td><td><button class="btn ghost icon-btn danger" type="button" data-delb="${esc(b)}" aria-label="Remove ${esc(b)}">${ICON.del}</button></td></tr>`).join('')}</tbody></table></div>
+    <datalist id="bldList">${s.knownBuildings.concat(['M3 old']).map(b => `<option value="${esc(b)}">`).join('')}</datalist>`;
+  const backup = `<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" type="button" id="expSet">Export settings</button>
+    <label class="btn" style="cursor:pointer">Import settings<input type="file" accept=".json" id="impSet" class="hide"></label><button class="btn danger" type="button" id="resetSet">Reset everything to defaults</button></div>`;
+  return `<div class="card">${section('Matching rules', ['Rules run from top to bottom. Each one fills the seats that are still empty in the matching teachers’ slots.', 'A student is only placed when their batch has no class at that time, and is booked once a week.'], rules, 'rules')}
+    ${section('Matching limits', 'These apply to every rule.', cons, 'sec-limits')}
+    ${section('Student count by building', ['Each slot starts with the students-per-slot number.', 'It loses 1 for each neighbouring class held in one of these buildings, because the teacher needs time to walk over.'], red, 'sec-building')}
+    ${section(`Teachers <span class="badge">${tRows.length}</span>`, 'Class decides which students a teacher can get under “same class group” and “teacher of class” rules.', teach, 'sec-teachers')}
+    ${section(`Batch buildings <span class="badge">${bRows.length}</span>`, 'Used by the building rule. Doubt classes take the building from the first word, such as “M3 P Dbt 2”.', bld, 'sec-batches')}
+    ${section('Backup', 'Copy all settings to another computer, or start over.', backup, 'sec-backup')}</div>`;
+}
+
+function viewSetup() {
+  const s = st.settings, ok = ready();
+  const todo = [!st.tt && 'upload the faculty timetable', !st.students && 'upload the student data', !s.cabins.filter(Boolean).length && 'add at least one cabin', !s.weekStart && 'set the Monday of the week', !shifts().length && 'switch on at least one period'].filter(Boolean);
+  const nav = [['sec-files', 'Files'], ['sec-week', 'Week and cabins'], ['rules', 'Matching rules'], ['sec-limits', 'Matching limits'], ['sec-building', 'Building rule'], ['sec-teachers', 'Teachers'], ['sec-batches', 'Batch buildings'], ['sec-backup', 'Backup']];
+  return head('Set up the week', 'Upload this week’s files, check cabins and periods, and adjust rules when something changes. Everything is saved in this browser; nothing is sent to a server.')
+  + `<div class="setup"><nav class="toc" aria-label="On this page"><ul>${nav.map(([id, l]) => `<li><a href="#${id}">${l}</a></li>`).join('')}</ul></nav><div class="setup-body">
+    <div class="group" id="sec-files"><h2 class="gh">Files</h2><p class="gd">Upload a new timetable each week. The student file only needs updating when it changes.</p>${viewUpload()}</div>
+    <div class="group" id="sec-week"><h2 class="gh">Week and cabins</h2><p class="gd">Check these before each calculation.</p>${viewWeek()}</div>
+    <div class="group" id="sec-rules"><h2 class="gh">Rules and lists</h2><p class="gd">Change these when rules, buildings or teachers change.</p>${viewRules()}</div>
+    <div class="calcbar card"><div><b>${ok ? 'Ready to calculate' : 'Almost ready'}</b><span class="muted">${ok ? 'The schedule opens on the Weekly schedule page.' : 'Still to do: ' + todo.join(', ') + '.'}</span></div>
+      <button class="btn primary" type="button" id="calc3" ${ok ? '' : 'disabled'}>Calculate schedule</button></div>
+  </div></div>`;
+}
+
+function viewSchedule() {
+  if (!st.plan) return head('Weekly schedule', 'The cabin board, sessions, students and workload appear here after calculating.')
+    + `<div class="card empty"><h2>No schedule yet</h2><p class="muted">${ready() ? 'Everything is set up. Calculate to build the week.' : 'Finish the Set up page first: files, cabins and at least one period.'}</p>
+      <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap"><button class="btn" type="button" data-go="0">Go to set up</button><button class="btn primary" type="button" id="calc4" ${ready() ? '' : 'disabled'}>Calculate schedule</button></div></div>`;
+  const r = st.result, cap = st.plan.reduce((a, p) => a + p.k, 0);
+  const notes = [...(r.invalid || []).map(x => ['e', x]), ...st.planWarnings.map(x => ['w', x]), ...r.warnings.map(x => ['w', x])];
+  const views = [['board', 'Cabin board'], ['sessions', 'Teacher sessions'], ['students', 'Students'], ['workload', 'Workload'], ['notes', `Moves and notes · ${st.moves.length + notes.length}`]];
+  return head('Weekly schedule', 'Select a slot on the board to move it, change its students or remove it. The student list updates straight away.',
+    `<button class="btn" type="button" id="addSlot">${ICON.plus}Add slot</button><button class="btn primary" type="button" id="dl">${ICON.dl}Download Excel</button>`)
+  + `<div class="kpis"><div class="kpi"><b>${st.plan.length}</b><span>Counselling slots</span></div><div class="kpi"><b>${r.rows.length}</b><span>Students booked of ${cap} seats</span></div>
+     <div class="kpi"><b>${st.moves.length}</b><span>Slots moved to a free cabin</span></div><div class="kpi"><b>${r.repeatSkips}</b><span>Repeat teachers avoided</span></div></div>
+  ${notes.some(n => n[0] === 'e') ? `<div class="notice e"><b>Fix before sending</b><ul>${notes.filter(n => n[0] === 'e').map(n => `<li>${esc(n[1])}</li>`).join('')}</ul></div>` : ''}
+  <div class="tabs" role="tablist">${views.map(([k, l]) => `<button type="button" role="tab" aria-selected="${st.view === k}" class="${st.view === k ? 'on' : ''}" data-view="${k}">${l}</button>`).join('')}</div>
+  ${({ board: vBoard, sessions: vSessions, students: vStudents, workload: vWorkload, notes: () => vNotes(notes) })[st.view]()}`;
+}
+const cabColor = c => `var(${CABCOL[Math.max(0, st.settings.cabins.indexOf(c)) % 6]})`;
+const firstName = t => tName(t).split(' ')[0];
+function vBoard() {
+  const s = st.settings, cnt = st.result.counts, SH = shifts();
+  const extra = [...new Set(st.plan.map(p => p.shift))].filter(x => !SH.includes(x));
+  const rows = E.SLOTS.filter(x => SH.includes(x) || extra.includes(x));
+  let h = `<div class="legend"><span><i style="background:var(--brass)"></i>Moved from its timetable slot</span><span><i style="background:var(--accent)"></i>Edited by you</span><span>The number on each slot is students booked</span></div>
+  <div class="boardwrap"><div class="board"><div class="dh"></div>${E.DAYS.map(d => `<div class="dh"><b>${d}</b><small>${fmtShort(dayDate(d))}</small></div>`).join('')}`;
+  for (const sh of rows) {
+    h += `<div class="sh"><b>${sh}</b><small>${s.shifts[sh][0]}–${s.shifts[sh][1]}</small></div>`;
+    for (const d of E.DAYS) {
+      const here = st.plan.filter(p => p.day === d && p.shift === sh); h += `<div class="cell">`;
+      if (!here.length) { h += `<span class="tile free">${s.cabins.length > 1 ? `All ${s.cabins.length} cabins free` : 'Cabin free'}</span></div>`; continue; }
+      for (const c of s.cabins) {
+        const p = here.find(x => x.cabin === c);
+        if (!p) { h += `<span class="tile free">Cabin ${esc(c)} free</span>`; continue; }
+        h += `<button type="button" class="tile ${p.manual ? 'manual' : p.moved ? 'moved' : ''}" style="background:${cabColor(c)}" data-pid="${p.id}" aria-label="${esc(p.t)}, cabin ${esc(c)}, ${d} ${sh}, ${cnt[p.id] || 0} students. Edit">
+          <span class="cab">${esc(c)}</span><span class="who">${esc(p.t)} <small>${esc(firstName(p.t))}</small></span><span class="n">${cnt[p.id] || 0}</span>
+          <span class="meta">${p.moved ? `<b>From ${p.origDay.slice(0, 3)} ${p.origShift}</b> · ` : ''}${E.hm(p.start)}–${E.hm(p.end)}</span></button>`;
+      }
+      here.filter(p => !p.cabin || !s.cabins.includes(p.cabin)).forEach(p => { h += `<button type="button" class="tile" style="background:var(--danger-soft)" data-pid="${p.id}"><span class="cab">!</span><span class="who">${esc(p.t)}</span><span class="n">${cnt[p.id] || 0}</span><span class="meta">No free cabin</span></button>`; });
+      h += `</div>`;
+    }
+  }
+  return h + `</div></div>`;
+}
+function vSessions() {
+  const w = E.workload(st.tt, E.makeCtx(st.tt, st.settings), st.plan), cnt = st.result.counts;
+  const bat = {}; st.result.rows.forEach(r => { (bat[r.pid] = bat[r.pid] || {})[r.s.batch] = (bat[r.pid][r.s.batch] || 0) + 1; });
+  return `<div class="tbl"><table><thead><tr><th>Date</th><th>Period</th><th>Cabin</th><th>Teacher</th><th>Subject</th><th>Class</th><th>Time</th><th class="num">Students</th><th class="num">Weekly workload</th><th>Student count rule</th><th>Venue</th><th>Moved from</th><th>Batches</th><th></th></tr></thead><tbody>
+  ${st.plan.map(p => `<tr class="${p.moved ? 'flag' : ''}"><td>${p.day.slice(0, 3)} ${fmtShort(p.date)}</td><td><b>${p.shift}</b></td><td><span class="chip" style="background:${cabColor(p.cabin)};padding:2px 10px;font-size:13px">${esc(p.cabin || '—')}</span></td>
+    <td><b>${esc(p.t)}</b> ${esc(tName(p.t))}</td><td>${esc(tSub(p.t))}</td><td>${esc(tCls(p.t))}</td><td>${E.hm(p.start)}–${E.hm(p.end)}</td><td class="num"><b>${cnt[p.id] || 0}</b> / ${p.k}</td>
+    <td class="num">${w[p.t] ? w[p.t].total : ''}</td><td class="muted">${esc(p.rule)}</td><td>${esc(p.venue)}</td><td>${p.moved ? `${p.origDay.slice(0, 3)} ${p.origShift}` : '—'}</td>
+    <td>${Object.entries(bat[p.id] || {}).map(([b, n]) => `${esc(b)} (${n})`).join(', ')}</td><td><button class="btn sm" type="button" data-pid="${p.id}">Edit</button></td></tr>`).join('')}</tbody></table></div>`;
+}
+function vStudents() {
+  const q = st.search.toLowerCase();
+  const rows = st.result.rows.filter(r => !q || (r.s.name + ' ' + r.s.roll + ' ' + r.s.batch + ' ' + r.p.t + ' ' + tName(r.p.t)).toLowerCase().includes(q));
+  return `<div style="display:flex;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap"><input class="input" id="sSearch" type="search" placeholder="Search name, roll no., batch or teacher" value="${esc(st.search)}" style="width:min(380px,100%)" aria-label="Search students">
+    <span class="muted">${rows.length} of ${st.result.rows.length} students</span>${st.excluded.size ? `<span class="badge warn">${st.excluded.size} replaced this week</span><button class="btn sm" type="button" id="restoreAll">Put them back</button>` : ''}</div>
+  <div class="tbl" style="max-height:640px"><table><thead><tr><th>Student</th><th>Teacher</th><th>Cabin</th><th>Day</th><th>Time</th><th>Last counselled</th><th class="num">Times before</th><th>Previously by</th><th>Roll no.</th><th>Batch</th><th>Matched by</th><th></th></tr></thead><tbody>
+  ${rows.map(r => `<tr><td><b>${esc(r.s.name)}</b></td><td>${esc(tName(r.p.t))} <span class="muted">${esc(r.p.t)}</span></td><td>${esc(r.p.cabin)}</td><td>${r.p.day.slice(0, 3)} ${fmtShort(r.p.date)} · ${r.p.shift}</td><td>${r.time}</td>
+    <td>${r.s.last ? fmtShort(r.s.last) : '<span class="muted">Never</span>'}</td><td class="num">${r.s.times}</td><td>${r.s.history.map(h => `${esc(h.by)} (${fmtShort(h.date)})`).join(', ') || '<span class="muted">—</span>'}</td>
+    <td>${esc(r.s.roll)}</td><td>${esc(r.s.batch)}</td><td class="muted">${esc(r.basis)}</td>
+    <td><button class="btn sm" type="button" data-excl="${esc(r.s.roll)}" title="Remove from this week and give the seat to the next student">Replace</button></td></tr>`).join('')}</tbody></table></div>`;
+}
+function vWorkload() {
+  const w = E.workload(st.tt, E.makeCtx(st.tt, st.settings), st.plan), cnt = {}; st.result.rows.forEach(r => cnt[r.p.t] = (cnt[r.p.t] || 0) + 1);
+  const ts = [...new Set(st.plan.map(p => p.t))].sort((a, b) => (tCls(a) + tSub(a) + a) < (tCls(b) + tSub(b) + b) ? -1 : 1);
+  return `<p class="muted" style="margin-top:0">Total slots = regular classes + doubt classes + counselling slots for the week. Day columns include counselling.</p>
+  <div class="tbl"><table><thead><tr><th>Teacher</th><th>Subject</th><th>Class</th>${E.DAYS.map(d => `<th class="num">${d.slice(0, 3)}</th>`).join('')}<th class="num">Regular</th><th class="num">Doubt</th><th class="num">Counselling</th><th class="num">Total slots</th><th class="num">Students</th></tr></thead><tbody>
+  ${ts.map(t => { const x = w[t]; return `<tr><td><b>${esc(t)}</b> ${esc(tName(t))}</td><td>${esc(tSub(t))}</td><td>${esc(tCls(t))}</td>${E.DAYS.map(d => `<td class="num">${x.perDay[d] + st.plan.filter(p => p.t === t && p.day === d).length}</td>`).join('')}<td class="num">${x.regular}</td><td class="num">${x.doubt}</td><td class="num">${x.counselling}</td><td class="num"><b>${x.total}</b></td><td class="num">${cnt[t] || 0}</td></tr>`; }).join('')}</tbody></table></div>`;
+}
+function vNotes(notes) {
+  return `${st.moves.length ? `<div class="tbl" style="margin-bottom:16px"><table><thead><tr><th>Teacher</th><th>Timetable slot</th><th>Moved to</th></tr></thead><tbody>${st.moves.map(m => `<tr><td><b>${esc(m.t)}</b> ${esc(tName(m.t))}</td><td>${esc(m.from)}</td><td>${esc(m.to)}</td></tr>`).join('')}</tbody></table></div>` : '<div class="notice i">No slots needed moving. Every period fits in the cabins.</div>'}
+  ${notes.length ? `<div class="card" style="padding:18px 22px"><ul style="margin:0;padding-left:20px">${notes.map(n => `<li style="${n[0] === 'e' ? 'color:var(--danger)' : ''}">${esc(n[1])}</li>`).join('')}</ul></div>` : ''}`;
+}
+
+/* ---------- edit panel ---------- */
+function openEdit(pid) {
+  const p = st.plan.find(x => x.id === pid), s = st.settings, isNew = !p, ctx = E.makeCtx(st.tt, s);
+  const teachers = [...new Set([...(st.tt ? st.tt.teachers : []), ...Object.keys(s.teachers)])].sort();
+  const SH = shifts(); if (p && !SH.includes(p.shift)) SH.push(p.shift);
+  $('dlgForm').innerHTML = `<div class="hd"><h3 id="dlgTitle">${isNew ? 'Add a counselling slot' : esc(tName(p.t))}</h3><p class="muted" style="margin:4px 0 0">${isNew ? 'The student list updates when you save.' : `${esc(p.t)} · ${esc(tSub(p.t))} · timetable slot ${p.origDay ? esc(p.origDay + ' ' + p.origShift) : 'added by you'}`}</p></div>
+    <div class="bd">${isNew ? `<div><label class="f" for="eT">Teacher</label><select class="input" id="eT" style="width:100%">${teachers.map(t => `<option value="${esc(t)}">${esc(t)} · ${esc(tName(t))}</option>`).join('')}</select></div>` : ''}
+      <div class="grid3"><div><label class="f" for="eD">Day</label><select class="input" id="eD">${E.DAYS.map(d => `<option ${p && p.day === d ? 'selected' : ''}>${d}</option>`).join('')}</select></div>
+        <div><label class="f" for="eS">Period</label><select class="input" id="eS">${E.SLOTS.filter(x => SH.includes(x)).map(x => `<option ${p && p.shift === x ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
+        <div><label class="f" for="eC">Cabin</label><select class="input" id="eC"><option value="">Any free</option>${s.cabins.map(c => `<option ${p && p.manual && p.cabin === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div></div>
+      <div><label class="f" for="eK">Students</label><input class="input" type="number" min="0" max="30" id="eK" placeholder="Automatic (building rule)" value="${p && p.manualK != null ? p.manualK : ''}" style="width:100%"></div>
+      <div class="check" id="eMsg" aria-live="polite"></div>
+      ${!isNew && st.result ? `<div><label class="f">Booked students</label><div class="muted" style="font-size:14px">${st.result.rows.filter(r => r.pid === p.id).map(r => `${r.time} ${esc(r.s.name)}`).join('<br>') || 'None'}</div></div>` : ''}</div>
+    <div class="ft">${isNew ? '<span></span>' : '<button class="btn danger" type="button" id="eDel">Remove slot</button>'}<div style="display:flex;gap:8px"><button class="btn" value="cancel" type="submit">Cancel</button><button class="btn primary" type="button" id="eSave">Save</button></div></div>`;
+  const check = () => {
+    const t = isNew ? $('eT').value : p.t, d = $('eD').value, sh = $('eS').value;
+    const e = ctx.cell.get(t + '|' + d + '|' + sh), clash = e && !ctx.isCounsel(e), n = st.plan.filter(x => x !== p && x.day === d && x.shift === sh).length, c = ctx.compute(t, d, sh);
+    $('eMsg').innerHTML = clash ? `<span style="color:var(--danger);font-weight:600">${esc(t)} has a class then (${esc(e.subj)} ${esc(e.room)}).</span>` : n >= s.cabins.length ? `<span style="color:var(--brass);font-weight:600">All ${s.cabins.length} cabins are taken on ${d} ${sh}.</span>` : `<b>Free.</b> The building rule gives ${c.k} students. <span class="muted">${esc(c.rule)}</span>`;
+  };
+  ['eD', 'eS', 'eT'].forEach(i => $(i) && $(i).addEventListener('change', check)); check();
+  $('eSave').onclick = () => {
+    const t = isNew ? $('eT').value : p.t, k = $('eK').value === '' ? null : Math.max(0, +$('eK').value);
+    const target = p || { id: 'm' + Date.now(), t, origDay: '', origShift: '', label: 'Added', moved: false };
+    Object.assign(target, { day: $('eD').value, shift: $('eS').value, cabin: $('eC').value, manual: true, manualK: k });
+    if (isNew) st.plan.push(target);
+    $('dlg').close(); assign(); persistEdits(); render(); toast('Slot saved');
+  };
+  if (!isNew) $('eDel').onclick = () => { if (!confirm(`Remove ${p.t}’s slot on ${p.day} ${p.shift}? Its students go back into the pool.`)) return; st.plan = st.plan.filter(x => x !== p); $('dlg').close(); assign(); persistEdits(); render(); toast('Slot removed'); };
+  $('dlg').showModal();
+}
+
+/* ---------- events ---------- */
+function bind() {
+  const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
+  const all = (sel, fn) => document.querySelectorAll(sel).forEach(fn);
+  all('[data-go]', b => b.onclick = () => { st.step = +b.dataset.go; render(); scrollTo(0, 0); });
+  on('ttFile', 'change', e => e.target.files[0] && onTimetable(e.target.files[0]));
+  on('recFile', 'change', e => e.target.files[0] && onStudents(e.target.files[0]));
+  all('[data-drop]', z => {
+    z.addEventListener('dragover', e => { e.preventDefault(); z.classList.add('over'); }); z.addEventListener('dragleave', () => z.classList.remove('over'));
+    z.addEventListener('drop', e => { e.preventDefault(); z.classList.remove('over'); const f = e.dataTransfer.files[0]; if (f) (z.dataset.drop === 'tt' ? onTimetable : onStudents)(f); });
+  });
+  on('clearData', 'click', async () => { if (!confirm('Remove the uploaded timetable and student data from this browser?')) return; await idb.del('tt'); await idb.del('rec'); Object.assign(st, { tt: null, records: null, recMeta: null, students: null }); resetSchedule(); render(); });
+  // week & cabins
+  on('addCab', 'click', () => { const v = $('newCab').value.trim(); if (!v) return; if (st.settings.cabins.includes(v)) return toast('That cabin is already listed'); st.settings.cabins.push(v); changed(); });
+  on('newCab', 'keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('addCab').click(); } });
+  all('[data-delcab]', b => b.onclick = () => { st.settings.cabins.splice(+b.dataset.delcab, 1); changed(); });
+  on('weekStart', 'change', e => { st.settings.weekStart = e.target.value; rebuildStudents(); changed(); });
+  all('[data-shift]', i => i.onchange = () => { st.settings.shifts[i.dataset.shift][+i.dataset.i] = i.value; changed(); });
+  all('[data-use]', i => i.onchange = () => { st.settings.counselShifts[i.dataset.use] = i.checked; if (i.checked && st.settings.autoMoveShifts[i.dataset.use] == null) st.settings.autoMoveShifts[i.dataset.use] = true; changed(); if (st.plan) toast('Recalculate to bring timetable counselling cells into this period'); });
+  all('[data-mv]', i => i.onchange = () => { st.settings.autoMoveShifts[i.dataset.mv] = i.checked; changed(); if (st.plan) toast('Recalculate to apply automatic moves'); });
+  on('base', 'change', e => { st.settings.baseStudents = Math.max(1, +e.target.value || 9); changed(); });
+  ['calc2', 'calc3', 'calc4'].forEach(id => on(id, 'click', calculate));
+  all('.toc a', a => a.onclick = e => { e.preventDefault(); const t = document.getElementById(a.getAttribute('href').slice(1)); if (t) t.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); });
+  // rules
+  all('[data-rule] [data-rf]', el => el.onchange = () => { const i = +el.closest('[data-rule]').dataset.rule, f = el.dataset.rf; st.settings.rules[i][f] = el.value; changed(f === 'tType' || f === 'sType'); });
+  all('[data-ron]', el => el.onchange = () => { st.settings.rules[+el.dataset.ron].on = el.checked; changed(); });
+  all('[data-rmove]', b => b.onclick = () => { const i = +b.dataset.rmove, j = i + (+b.dataset.d), R = st.settings.rules; [R[i], R[j]] = [R[j], R[i]]; changed(); });
+  all('[data-rdel]', b => b.onclick = () => { const R = st.settings.rules; if (R.length === 1) return toast('Keep at least one rule'); if (!confirm(`Delete the rule “${R[+b.dataset.rdel].name}”?`)) return; R.splice(+b.dataset.rdel, 1); changed(); });
+  on('addRule', 'click', () => { st.settings.rules.push({ id: 'r' + Date.now(), name: 'New rule', on: true, tType: 'codes', tValue: '', sType: 'batches', sValue: '' }); changed(); const last = document.querySelector('[data-rule]:last-of-type .name'); if (last) { last.focus(); last.select(); } });
+  on('resetRules', 'click', () => { if (!confirm('Replace your rules with the two default rules?')) return; st.settings.rules = E.defaultRules(); changed(); });
+  on('optRepeat', 'change', e => { st.settings.noRepeatTeacher = e.target.checked; changed(false); });
+  on('optMove', 'change', e => { st.settings.moveOverflow = e.target.checked; changed(false); if (st.plan) toast('Recalculate to apply'); });
+  on('gap', 'change', e => { st.settings.minGapDays = Math.max(0, +e.target.value || 0); changed(false); });
+  on('cg', 'change', e => { st.settings.classGroups = e.target.value; changed(false); });
+  on('kw', 'change', e => { st.settings.keyword = e.target.value.trim() || 'Counselling'; changed(); });
+  on('addRed', 'click', () => { const v = $('newRed').value.trim(); if (v && !st.settings.reduceBuildings.includes(v)) { st.settings.reduceBuildings.push(v); changed(); } });
+  on('newRed', 'keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('addRed').click(); } });
+  all('[data-delred]', b => b.onclick = () => { st.settings.reduceBuildings.splice(+b.dataset.delred, 1); changed(); });
+  all('[data-chk]', sel => sel.onchange = () => { st.settings.checks[sel.dataset.chk][sel.dataset.k] = sel.value; changed(false); });
+  all('#tTable [data-tf]', i => i.onchange = () => { st.settings.teachers[i.closest('tr').dataset.t][i.dataset.tf] = i.value.trim(); changed(false); });
+  all('[data-delt]', b => b.onclick = () => { delete st.settings.teachers[b.dataset.delt]; changed(); });
+  on('addT', 'click', () => { const c = (prompt('Teacher short code, as in the timetable') || '').trim(); if (!c) return; st.settings.teachers[c] = st.settings.teachers[c] || { name: '', subject: '', cls: '' }; changed(); });
+  all('#bTable [data-bf]', i => i.onchange = () => { st.settings.batchBuildings[i.closest('tr').dataset.b] = i.value.trim(); changed(false); });
+  all('[data-delb]', b => b.onclick = () => { delete st.settings.batchBuildings[b.dataset.delb]; changed(); });
+  on('addB', 'click', () => { const b = (prompt('Batch code, as in the timetable') || '').trim(); if (!b) return; const g = (prompt(`Building for ${b}`) || '').trim(); if (!g) return; st.settings.batchBuildings[b] = g; changed(); });
+  const filt = (inp, tbl) => on(inp, 'input', e => { const q = e.target.value.toLowerCase(); document.querySelectorAll(`#${tbl} tbody tr`).forEach(tr => tr.classList.toggle('hide', !tr.textContent.toLowerCase().includes(q) && ![...tr.querySelectorAll('input')].some(i => i.value.toLowerCase().includes(q)))); });
+  filt('tFilter', 'tTable'); filt('bFilter', 'bTable');
+  on('impT', 'change', e => e.target.files[0] && importTeachers(e.target.files[0]).catch(x => alert(x.message)));
+  on('impB', 'change', e => e.target.files[0] && importRoomList(e.target.files[0]).catch(x => alert(x.message)));
+  on('expSet', 'click', () => saveFile('counselling-planner-settings.json', JSON.stringify(st.settings, null, 2)));
+  on('impSet', 'change', e => { const f = e.target.files[0]; if (!f) return; f.text().then(t => { const s = JSON.parse(t); if (!s.cabins || !s.shifts) throw new Error('This is not a Counselling Planner settings file.'); localStorage.setItem(KEY, JSON.stringify(s)); st.settings = loadSettings(); changed(); toast('Settings imported'); }).catch(x => alert(x.message)); });
+  on('resetSet', 'click', () => { if (!confirm('Reset cabins, periods, rules, teachers and batch buildings to the defaults?')) return; const w = st.settings.weekStart; st.settings = E.defaultSettings(MASTER); st.settings.weekStart = w; changed(); });
+  // schedule
+  all('[data-view]', b => b.onclick = () => { st.view = b.dataset.view; render(); });
+  all('[data-pid]', b => b.onclick = () => openEdit(b.dataset.pid));
+  on('addSlot', 'click', () => openEdit(null));
+  on('dl', 'click', downloadExcel);
+  on('sSearch', 'input', e => { st.search = e.target.value; const pos = e.target.selectionStart; render(); const i = $('sSearch'); i.focus(); i.setSelectionRange(pos, pos); });
+  all('[data-excl]', b => b.onclick = () => { st.excluded.add(b.dataset.excl); assign(); persistEdits(); render(); toast('Seat given to the next student in line'); });
+  on('restoreAll', 'click', () => { st.excluded.clear(); assign(); persistEdits(); render(); });
+}
+
+/* ---------- saving ---------- */
+async function saveFile(name, data) {
+  try {
+    if (window.claude && window.claude.use) {
+      const dl = await window.claude.use('downloads');
+      if (dl) { try { await dl.save({ filename: name, data: data instanceof Blob ? data : new Blob([data]) }); toast('Saved'); } catch (e) { if (e && e.code !== 'declined') toast('The file could not be saved here.'); } return; }
+    }
+  } catch (e) {}
+  const blob = data instanceof Blob ? data : new Blob([data], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+async function downloadExcel() {
+  busy(true, 'Building the Excel file…'); await nextFrame();
+  try {
+    const wb = new ExcelJS.Workbook(), s = st.settings, r = st.result, cnt = r.counts, SH = E.SLOTS.filter(x => shifts().includes(x) || st.plan.some(p => p.shift === x));
+    const NAVY = 'FF1F3864', CAB = ['FFE2EFDA', 'FFDDEBF7', 'FFFCE4D6', 'FFEADFF3', 'FFF6DCE2', 'FFDFF1F1'], MOVED = 'FFFFE699';
+    const solid = argb => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } }), cabFill = c => solid(CAB[Math.max(0, s.cabins.indexOf(c)) % 6]);
+    const ln = { style: 'thin', color: { argb: 'FFBFC7D5' } }, border = { top: ln, left: ln, bottom: ln, right: ln };
+    const weekTxt = `${fmtDate(s.weekStart)} – ${fmtDate(E.addDays(s.weekStart, 5))}`;
+    function sheet(name, title, sub, headers, widths, rows, o = {}) {
+      const ws = wb.addWorksheet(name, { views: [{ state: 'frozen', ySplit: 3, xSplit: o.xSplit || 0 }] });
+      ws.mergeCells(1, 1, 1, headers.length); ws.getCell(1, 1).value = title; ws.getCell(1, 1).font = { name: 'Arial', bold: true, size: 14, color: { argb: NAVY } };
+      ws.getCell(2, 1).value = sub; ws.getCell(2, 1).font = { name: 'Arial', italic: true, size: 9, color: { argb: 'FF595959' } };
+      const hr = ws.getRow(3); headers.forEach((h, i) => { const c = hr.getCell(i + 1); c.value = h; c.font = { name: 'Arial', bold: true, color: { argb: 'FFFFFFFF' }, size: 10 }; c.fill = solid(i < (o.key || 0) ? 'FF2F5597' : NAVY); c.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; c.border = border; });
+      hr.height = 30; widths.forEach((w, i) => ws.getColumn(i + 1).width = w);
+      rows.forEach((vals, ri) => { const row = ws.getRow(ri + 4); vals.forEach((v, ci) => { const c = row.getCell(ci + 1); c.value = v; c.font = { name: 'Arial', size: 10, bold: (o.bold || []).includes(ci) }; c.border = border; c.alignment = { vertical: 'middle', horizontal: (o.left || []).includes(ci) ? 'left' : 'center' }; }); if (o.style) o.style(row, ri); });
+      if (rows.length) ws.autoFilter = { from: { row: 3, column: 1 }, to: { row: rows.length + 3, column: headers.length } };
+    }
+    const g = wb.addWorksheet('Cabin Schedule', { views: [{ state: 'frozen', ySplit: 3 }] });
+    g.mergeCells(1, 1, 1, 3 + s.cabins.length); g.getCell(1, 1).value = `COUNSELLING CABIN SCHEDULE  ·  ${weekTxt}`; g.getCell(1, 1).font = { name: 'Arial', bold: true, size: 14, color: { argb: NAVY } };
+    g.getCell(2, 1).value = 'One teacher per cabin per slot. Yellow = moved from the timetable slot.'; g.getCell(2, 1).font = { name: 'Arial', italic: true, size: 9, color: { argb: 'FF595959' } };
+    [12, 8, 13].concat(s.cabins.map(() => 38)).forEach((w, i) => g.getColumn(i + 1).width = w);
+    let gr = 4;
+    for (const d of E.DAYS) {
+      const dr = g.getRow(gr); dr.getCell(1).value = `${d.toUpperCase()}  ·  ${fmtDate(dayDate(d))}`; dr.getCell(1).font = { name: 'Arial', bold: true, size: 11, color: { argb: NAVY } };
+      for (let c = 1; c <= 3 + s.cabins.length; c++) dr.getCell(c).fill = solid('FFD9E2F3');
+      gr++; const hr = g.getRow(gr); ['Day', 'Period', 'Time'].concat(s.cabins.map(c => `Cabin ${c}`)).forEach((h, i) => { const c = hr.getCell(i + 1); c.value = h; c.font = { name: 'Arial', bold: true, color: { argb: 'FFFFFFFF' } }; c.fill = solid(NAVY); c.alignment = { horizontal: 'center' }; c.border = border; }); gr++;
+      for (const sh of SH) {
+        const row = g.getRow(gr); row.height = 48;
+        [d.slice(0, 3), sh, `${s.shifts[sh][0]}–${s.shifts[sh][1]}`].forEach((v, i) => { const c = row.getCell(i + 1); c.value = v; c.font = { name: 'Arial', size: 10, bold: i === 1 }; c.border = border; c.alignment = { horizontal: 'center', vertical: 'middle' }; });
+        s.cabins.forEach((cab, j) => {
+          const p = st.plan.find(x => x.day === d && x.shift === sh && x.cabin === cab), c = row.getCell(4 + j); c.border = border; c.alignment = { wrapText: true, vertical: 'middle' }; c.font = { name: 'Arial', size: 10, color: { argb: p ? 'FF000000' : 'FFA6A6A6' } };
+          if (!p) { c.value = '— free —'; c.fill = cabFill(cab); return; }
+          c.value = `${p.t} · ${tName(p.t)} (${tSub(p.t)})\n${E.hm(p.start)}–${E.hm(p.end)}  ·  ${cnt[p.id] || 0} students${p.moved ? `\n↻ moved from ${p.origDay.slice(0, 3)} ${p.origShift}` : ''}`;
+          c.fill = p.moved ? solid(MOVED) : cabFill(cab);
+        });
+        gr++;
+      }
+      gr++;
+    }
+    const w = E.workload(st.tt, E.makeCtx(st.tt, s), st.plan), bat = {}; r.rows.forEach(x => { (bat[x.pid] = bat[x.pid] || {})[x.s.batch] = (bat[x.pid][x.s.batch] || 0) + 1; });
+    sheet('Teacher Sessions', 'TEACHER-WISE COUNSELLING SESSIONS', `Week ${weekTxt}. Students per slot: ${s.baseStudents}, minus 1 for each neighbouring class in ${s.reduceBuildings.join(' / ')}.`,
+      ['Sr.', 'Date', 'Day', 'Period', 'Cabin', 'Teacher Code', 'Teacher Name', 'Subject', 'Class', 'Start', 'End', 'Students Assigned', 'Weekly Workload (Slots)', 'Student-Count Rule', 'Venue', 'Slot Moved From', 'Batches'],
+      [6, 11, 11, 7, 7, 9, 20, 10, 9, 8, 8, 10, 11, 36, 13, 14, 30],
+      st.plan.map((p, i) => [i + 1, fmtDate(p.date), p.day, p.shift, p.cabin, p.t, tName(p.t), tSub(p.t), tCls(p.t), E.hm(p.start), E.hm(p.end), cnt[p.id] || 0, w[p.t] ? w[p.t].total : '', p.rule, p.venue, p.moved ? `${p.origDay.slice(0, 3)} ${p.origShift}` : '—', Object.entries(bat[p.id] || {}).map(([b, n]) => `${b} (${n})`).join(', ')]),
+      { left: [6, 13, 16], bold: [11, 12], style: (row, i) => { const p = st.plan[i]; row.getCell(5).fill = cabFill(p.cabin); if (p.moved) row.getCell(16).fill = solid(MOVED); } });
+    sheet('Student Assignments', 'STUDENT-WISE COUNSELLING ASSIGNMENTS', 'Key columns first. No student is given a teacher who has counselled them before.',
+      ['Sr.', 'Student Name', 'Teacher Name', 'Cabin', 'Date', 'Time', 'Last Counselled', 'Times Counselled Before', 'Previously Counselled By', 'Roll No.', 'Batch', 'Day', 'Period', 'Teacher Code', 'Subject', 'Course', 'Batch Class Shift', 'Matched By'],
+      [6, 26, 20, 7, 11, 8, 13, 11, 28, 11, 8, 11, 7, 9, 10, 13, 10, 24],
+      r.rows.map((x, i) => [i + 1, x.s.name, tName(x.p.t), x.p.cabin, fmtDate(x.p.date), x.time, x.s.last ? fmtDate(x.s.last) : 'Never', x.s.times, x.s.history.map(h => `${h.by} (${h.date.slice(8, 10)}-${h.date.slice(5, 7)})`).join(', ') || '—', x.s.roll, x.s.batch, x.p.day, x.p.shift, x.p.t, tSub(x.p.t), x.s.course, x.batchShift, x.basis]),
+      { key: 9, xSplit: 2, left: [1, 2, 8, 17], bold: [1, 2], style: (row, i) => { row.getCell(4).fill = cabFill(r.rows[i].p.cabin); } });
+    const tlist = [...new Set(st.plan.map(p => p.t))].sort((a, b) => (tCls(a) + tSub(a) + a) < (tCls(b) + tSub(b) + b) ? -1 : 1), sc = {}; r.rows.forEach(x => sc[x.p.t] = (sc[x.p.t] || 0) + 1);
+    sheet('Teacher Workload', 'WEEKLY WORKLOAD · TEACHERS WITH COUNSELLING SLOTS', 'Total slots = regular classes + doubt classes + counselling slots. Day columns include counselling.',
+      ['Code', 'Teacher Name', 'Subject', 'Class'].concat(E.DAYS.map(d => d.slice(0, 3)), ['Regular Classes', 'Doubt Classes', 'Counselling Slots', 'Total Slots (Week)', 'Students Assigned']),
+      [8, 20, 10, 9, 6, 6, 6, 6, 6, 6, 10, 10, 11, 12, 11],
+      tlist.map(t => [t, tName(t), tSub(t), tCls(t)].concat(E.DAYS.map(d => w[t].perDay[d] + st.plan.filter(p => p.t === t && p.day === d).length), [w[t].regular, w[t].doubt, w[t].counselling, w[t].total, sc[t] || 0])), { left: [1], bold: [13] });
+    sheet('Rules Used', 'MATCHING RULES USED FOR THIS SCHEDULE', 'Rules run from top to bottom.', ['Order', 'Rule', 'On', 'Teachers', 'Students'], [7, 28, 6, 36, 44],
+      s.rules.map((x, i) => [i + 1, x.name, x.on ? 'Yes' : 'No', (T_TYPES.find(t => t[0] === x.tType) || ['', ''])[1] + (x.tValue ? ': ' + x.tValue : ''), (S_TYPES.find(t => t[0] === x.sType) || ['', ''])[1] + (x.sValue ? ': ' + x.sValue : '')]), { left: [1, 3, 4] });
+    sheet('Moves and Notes', 'SLOT MOVES AND NOTES', 'Moves were made because a period had more teachers than cabins.', ['Type', 'Detail'], [16, 110],
+      st.moves.map(m => ['Moved', `${m.t} (${tName(m.t)}): ${m.from} → ${m.to}`]).concat(st.planWarnings.map(x => ['Note', x]), r.warnings.map(x => ['Note', x]), (r.invalid || []).map(x => ['Check', x])), { left: [1] });
+    const buf = await wb.xlsx.writeBuffer();
+    await saveFile(`Counselling_Schedule_${s.weekStart}.xlsx`, new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  } catch (e) { alert('The Excel file could not be built: ' + e.message); console.error(e); }
+  busy(false);
+}
+
+/* ---------- start ---------- */
+document.querySelectorAll('.stepper button').forEach(b => b.onclick = () => { st.step = +b.dataset.step; render(); scrollTo(0, 0); });
+$('calcBtn').onclick = calculate;
+function markToc() {
+  if (st.step !== 0) return; const links = [...document.querySelectorAll('.toc a')]; if (!links.length) return;
+  let cur = links[0]; for (const a of links) { const t = document.getElementById(a.getAttribute('href').slice(1)); if (t && t.getBoundingClientRect().top < 200) cur = a; }
+  if (innerHeight + scrollY >= document.body.scrollHeight - 4) cur = links[links.length - 1];
+  links.forEach(a => { a.classList.toggle('on', a === cur); if (a === cur) a.setAttribute('aria-current', 'location'); else a.removeAttribute('aria-current'); });
+}
+addEventListener('scroll', markToc, { passive: true });
+function applyTheme(t) { if (t) document.documentElement.setAttribute('data-theme', t); else document.documentElement.removeAttribute('data-theme'); }
+let theme = null; try { theme = localStorage.getItem('mcs_planner_theme'); } catch (e) {} applyTheme(theme);
+$('themeBtn').onclick = () => { const cur = document.documentElement.getAttribute('data-theme'), dark = cur === 'dark' || (!cur && matchMedia('(prefers-color-scheme: dark)').matches); theme = dark ? 'light' : 'dark'; applyTheme(theme); try { localStorage.setItem('mcs_planner_theme', theme); } catch (e) {} };
+(async function init() {
+  st.settings = loadSettings(); render();
+  if (!window.XLSX || !window.ExcelJS) $('main').insertAdjacentHTML('afterbegin', '<div class="notice e">The Excel libraries did not load. Check the internet connection and reload the page.</div>');
+  const t = await idb.get('tt'); if (t) { st.tt = t.tt; st.ttName = t.name; }
+  const r = await idb.get('rec'); if (r) { st.records = r.recs; st.recMeta = r.meta; st.recName = r.name; rebuildStudents(); }
+  restoreEdits(); if (st.plan) st.step = 1; render();
+})();
+</script>
+</body>
+</html>
