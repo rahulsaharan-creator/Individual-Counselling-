@@ -463,7 +463,8 @@ function viewRules() {
         <button class="btn ghost icon-btn" type="button" data-rmove="${i}" data-d="1" aria-label="Move rule down" ${i < s.rules.length - 1 ? '' : 'disabled'}>${ICON.down}</button>
         <button class="btn ghost icon-btn danger" type="button" data-rdel="${i}" aria-label="Delete rule">${ICON.del}</button></div></div>`).join('')}</div>
     <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button class="btn" type="button" id="addRule">${ICON.plus}Add rule</button><button class="btn ghost" type="button" id="resetRules">Restore default rules</button></div>`;
-  const cons = `<div class="optline">${toggle('optRepeat', s.noRepeatTeacher, 'Always a different teacher')}<div><b>Always a different teacher</b><span class="muted">Skip students this teacher has counselled before.</span></div></div>
+  const cons = `<div class="optline">${toggle('optOpp', s.oppositeShiftOnly !== false, 'Counsel students only in the opposite shift')}<div><b>Only in the opposite shift</b><span class="muted">Morning batches are counselled in evening periods and evening batches in morning periods. Turn off to also use free periods inside a batch’s own shift.</span></div></div>
+    <div class="optline">${toggle('optRepeat', s.noRepeatTeacher, 'Always a different teacher')}<div><b>Always a different teacher</b><span class="muted">Skip students this teacher has counselled before.</span></div></div>
     <div class="optline">${toggle('optMove', s.moveOverflow, 'Move slots when cabins are full')}<div><b>Move slots when cabins are full</b><span class="muted">Same day first, then the nearest day, only where the teacher has no class.</span></div></div>
     <div class="optline"><input class="input sm" type="number" min="0" max="365" id="gap" value="${s.minGapDays || 0}" style="width:76px" aria-label="Minimum days between counselling"><div><b>Days before a student can be counselled again</b><span class="muted">0 means no limit. Students counselled more recently are skipped.</span></div></div>
     <div class="optline" style="display:block"><label class="f" for="cg">Teacher classes that share students</label><input class="input" id="cg" value="${esc(s.classGroups)}" style="width:min(380px,100%)"><div class="muted" style="font-size:13.5px;margin-top:4px">Separate groups with |. Used by “students of the same class group”.</div></div>
@@ -490,7 +491,7 @@ function viewRules() {
     <datalist id="bldList">${s.knownBuildings.concat(['M3 old']).map(b => `<option value="${esc(b)}">`).join('')}</datalist>`;
   const backup = `<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" type="button" id="expSet">Export settings</button>
     <label class="btn" style="cursor:pointer">Import settings<input type="file" accept=".json" id="impSet" class="hide"></label><button class="btn danger" type="button" id="resetSet">Reset everything to defaults</button></div>`;
-  return `<div class="card">${section('Matching rules', ['Rules run from top to bottom. Each one fills the seats that are still empty in the matching teachers’ slots.', 'A student is only placed when their batch has no class at that time, and is booked once a week.'], rules, 'rules')}
+  return `<div class="card">${section('Matching rules', ['Rules run from top to bottom. Each one fills the seats that are still empty in the matching teachers’ slots.', 'A student is only placed when they have no class then (by default, only in the shift opposite to their classes), and is booked once a week.'], rules, 'rules')}
     ${section('Matching limits', 'These apply to every rule.', cons, 'sec-limits')}
     ${section('Student count by building', ['Each slot starts with the students-per-slot number.', 'It loses 1 for each neighbouring class held in one of these buildings, because the teacher needs time to walk over.'], red, 'sec-building')}
     ${section(`Teachers <span class="badge">${tRows.length}</span>`, 'Class decides which students a teacher can get under “same class group” and “teacher of class” rules.', teach, 'sec-teachers')}
@@ -646,6 +647,7 @@ function bind() {
   all('[data-rdel]', b => b.onclick = () => { const R = st.settings.rules; if (R.length === 1) return toast('Keep at least one rule'); if (!confirm(`Delete the rule “${R[+b.dataset.rdel].name}”?`)) return; R.splice(+b.dataset.rdel, 1); changed(); });
   on('addRule', 'click', () => { st.settings.rules.push({ id: 'r' + Date.now(), name: 'New rule', on: true, tType: 'codes', tValue: '', sType: 'batches', sValue: '' }); changed(); const last = document.querySelector('[data-rule]:last-of-type .name'); if (last) { last.focus(); last.select(); } });
   on('resetRules', 'click', () => { if (!confirm('Replace your rules with the two default rules?')) return; st.settings.rules = E.defaultRules(); changed(); });
+  on('optOpp', 'change', e => { st.settings.oppositeShiftOnly = e.target.checked; changed(false); });
   on('optRepeat', 'change', e => { st.settings.noRepeatTeacher = e.target.checked; changed(false); });
   on('optMove', 'change', e => { st.settings.moveOverflow = e.target.checked; changed(false); if (st.plan) toast('Recalculate to apply'); });
   on('gap', 'change', e => { st.settings.minGapDays = Math.max(0, +e.target.value || 0); changed(false); });

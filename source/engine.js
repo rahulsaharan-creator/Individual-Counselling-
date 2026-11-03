@@ -33,6 +33,7 @@
       classGroups: '11th | Target, 12th',
       moveOverflow: true,
       noRepeatTeacher: true,
+      oppositeShiftOnly: true,
       minGapDays: 0,
       rules: defaultRules(),
       batchBuildings: (master && master.batchBuildings) || {},
@@ -278,7 +279,12 @@
     const batchCls = {}; for (const b in votes) batchCls[b] = Object.entries(votes[b]).sort((a, b2) => b2[1] - a[1])[0][0];
     const byBatch = new Map(); for (const s of students.values()) { if (!byBatch.has(s.batch)) byBatch.set(s.batch, []); byBatch.get(s.batch).push(s); }
     for (const arr of byBatch.values()) arr.sort((a, b) => (a.last || '') < (b.last || '') ? -1 : (a.last || '') > (b.last || '') ? 1 : (a.roll < b.roll ? -1 : 1));
-    const freeAt = (b, d, sl) => ctx.occ.has(b) && !ctx.occ.get(b).has(d + '|' + sl);
+    const classShifts = new Map();
+    for (const [b, set] of ctx.occ) classShifts.set(b, new Set([...set].map(k => k.split('|')[1][0])));
+    const opposite = settings.oppositeShiftOnly !== false;
+    // a student is free when their batch has no class in that period and, if opposite-shift-only is on,
+    // the counselling period is in the shift where the batch has no classes at all
+    const freeAt = (b, d, sl) => ctx.occ.has(b) && !ctx.occ.get(b).has(d + '|' + sl) && (!opposite || !classShifts.get(b).has(sl[0]));
     const direct = {};
     for (const e of tt.entries) if (e.room && !ctx.isCounsel(e) && !ctx.isDoubt(e.room)) (direct[e.t] = direct[e.t] || new Set()).add(e.room);
     const used = new Set(); const assign = []; let repeatSkips = 0, gapSkips = 0; const count = new Map();
