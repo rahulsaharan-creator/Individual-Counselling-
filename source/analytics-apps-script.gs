@@ -1,9 +1,10 @@
 /**
  * Counselling Planner usage analytics: receiver.
- * Paste into the Google Sheet "Counselling Planner usage analytics" via Extensions > Apps Script,
- * then Deploy > New deployment > Web app (Execute as: Me, Who has access: Anyone).
+ * Writes to the Google Sheet "Counselling Planner usage analytics" (SHEET_ID).
+ * Deploy > New deployment > Web app (Execute as: Me, Who has access: Anyone).
  * The planner posts usage events here; each event becomes one row in the Events tab.
  */
+var SHEET_ID = '1g48OtETJZdOqnp3Y7tqYcZWs4Kqmxxx4E_plIbJzw9M';
 var SHEET = 'Events';
 var TZ = 'Asia/Kolkata';
 var EVENTS = ['app_open', 'user_named', 'page_view', 'click', 'setting_change', 'upload_timetable', 'upload_students',
@@ -28,7 +29,7 @@ function doPost(e) {
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
-    var sh = SpreadsheetApp.getActive().getSheetByName(SHEET);
+    var sh = SpreadsheetApp.openById(SHEET_ID).getSheetByName(SHEET);
     sh.getRange(sh.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
   } finally { lock.releaseLock(); }
   return out('ok ' + rows.length);
@@ -36,7 +37,12 @@ function doPost(e) {
 
 function doGet() { return out('Counselling Planner analytics is running.'); }
 
-/* Strings are stored as plain text: a leading = + - @ is prefixed so a cell can never become a formula. */
-function s(v, max) { v = v == null ? '' : String(v).slice(0, max || 150); return /^[=+\-@]/.test(v) ? "'" + v : v; }
+/* Strings are stored as plain text: a leading = + - @ gets a space in front so a cell can never become a formula. */
+function s(v, max) {
+  v = v == null ? '' : String(v).slice(0, max || 150);
+  var c = v.charAt(0);
+  if (c === '=' || c === '+' || c === '-' || c === '@') v = ' ' + v;
+  return v;
+}
 function n(v) { return typeof v === 'number' && isFinite(v) ? v : ''; }
 function out(msg) { return ContentService.createTextOutput(msg).setMimeType(ContentService.MimeType.TEXT); }
