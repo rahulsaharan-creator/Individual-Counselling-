@@ -225,14 +225,10 @@ dialog form{display:flex;flex-direction:column;height:100%}
 @media (max-width:640px){ .rule{grid-template-columns:auto minmax(0,1fr)} .rule .acts{grid-column:2} .rule .sent select.input,.rule .sent input.input{width:100%!important} }
 @media (max-width:520px){ .grid3{grid-template-columns:1fr 1fr} .calc-label{display:none} }
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+.who{position:fixed;inset:0;z-index:100;display:grid;place-items:center;background:rgba(0,0,0,.45);padding:16px}
+.who form{background:var(--surface,#fff);color:inherit;max-width:380px;width:100%;padding:24px;border-radius:14px;display:flex;flex-direction:column;gap:12px;box-shadow:0 10px 40px rgba(0,0,0,.3)}
+.who h3{margin:0}.who p{margin:0;opacity:.8}.who input{padding:10px 12px;border:1px solid #8886;border-radius:8px;font:inherit;background:transparent;color:inherit}
 </style>
-<script type="text/javascript">
-    (function(c,l,a,r,i,t,y){
-        c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
-        t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;
-        y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
-    })(window, document, "clarity", "script", "z8bnq9rhe1");
-</script>
 </head>
 <body>
 <header class="appbar">
@@ -255,8 +251,10 @@ dialog form{display:flex;flex-direction:column;height:100%}
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<script>/*ANALYTICS*/</script>
 <script>/*ENGINE*/</script>
 <script>
+const T = (e, d) => { try { window.track && window.track(e, d); } catch (x) {} };
 const MASTER = /*DEFAULTS*/;
 const E = window.MCSEngine;
 const $ = id => document.getElementById(id);
@@ -327,7 +325,8 @@ async function onTimetable(file) {
     if (!tt) throw lastErr;
     st.tt = tt; st.ttName = file.name; if (tt.weekStart) st.settings.weekStart = tt.weekStart;
     saveSettings(); await idb.set('tt', { tt, name: file.name }); rebuildStudents(); resetSchedule(); toast('Timetable loaded');
-  } catch (e) { alert(e.message); }
+    T('upload_timetable', { ok: true, teachers: (tt.teachers || []).length, size_kb: Math.round(file.size / 1024) });
+  } catch (e) { T('upload_timetable', { ok: false, size_kb: Math.round(file.size / 1024) }); alert(e.message); }
   busy(false); render();
 }
 async function onStudents(file) {
@@ -338,7 +337,8 @@ async function onStudents(file) {
     if (!p.records.length) throw new Error('No student rows found. Each sheet needs columns for Roll No., Student Name and Batch (plus Date and Counsellor for history).');
     st.records = p.records.map(r => ({ ...r, date: r.date ? r.date.toISOString().slice(0, 10) : null })); st.recMeta = p.used; st.recName = file.name;
     await idb.set('rec', { recs: st.records, meta: p.used, name: file.name }); rebuildStudents(); resetSchedule(); toast('Student data loaded');
-  } catch (e) { alert(e.message); }
+    T('upload_students', { ok: true, students: st.students ? st.students.size : null, records: st.records.length, size_kb: Math.round(file.size / 1024) });
+  } catch (e) { T('upload_students', { ok: false, size_kb: Math.round(file.size / 1024) }); alert(e.message); }
   busy(false); render();
 }
 function rebuildStudents() { st.students = st.records ? E.buildStudents(st.records.map(r => ({ ...r, date: r.date ? new Date(r.date + 'T00:00:00Z') : null })), st.settings.weekStart) : null; }
@@ -379,12 +379,13 @@ function resetSchedule() { st.plan = null; st.result = null; st.moves = []; st.p
 const ready = () => !!(st.tt && st.students && st.settings.cabins.filter(Boolean).length && st.settings.weekStart && shifts().length);
 async function calculate() {
   if (!ready()) return;
-  busy(true, 'Calculating the week…'); await nextFrame();
+  busy(true, 'Calculating the week…'); await nextFrame(); const t0 = performance.now(), again = !!st.plan;
   try {
     rebuildStudents(); const bp = E.buildPlan(st.tt, st.settings);
     st.plan = bp.plan; st.moves = bp.moves; st.planWarnings = bp.warnings; st.excluded = new Set();
     assign(); st.step = 1; st.view = 'board'; scrollTo(0, 0); persistEdits(); toast('Schedule calculated');
-  } catch (e) { alert('Calculation failed: ' + e.message); console.error(e); }
+    T('calculate', { ok: true, recalculate: again, ms: Math.round(performance.now() - t0), slots: st.plan.length, booked: st.result && st.result.rows ? st.result.rows.length : null, moves: st.moves.length, warnings: st.planWarnings.length, checks: (st.result && st.result.invalid || []).length, students: st.students ? st.students.size : null });
+  } catch (e) { T('calculate', { ok: false, recalculate: again, ms: Math.round(performance.now() - t0) }); alert('Calculation failed: ' + e.message); console.error(e); }
   busy(false); render();
 }
 function assign() {
@@ -410,6 +411,8 @@ function render() {
     if (i === st.step) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current');
   });
   const y = window.scrollY;
+  const pg = st.step === 0 ? 'Set up' : 'Weekly schedule: ' + st.view;
+  if (pg !== window.__plannerPage) { window.__plannerPage = pg; T('page_view', { feature: pg }); }
   $('main').innerHTML = [viewSetup, viewSchedule][st.step]();
   bind(); if (st.step === 0) { window.scrollTo(0, y); markToc(); }
 }
@@ -675,7 +678,7 @@ function bind() {
   on('impT', 'change', e => e.target.files[0] && importTeachers(e.target.files[0]).catch(x => alert(x.message)));
   on('impB', 'change', e => e.target.files[0] && importRoomList(e.target.files[0]).catch(x => alert(x.message)));
   on('expSet', 'click', () => saveFile('counselling-planner-settings.json', JSON.stringify(st.settings, null, 2)));
-  on('impSet', 'change', e => { const f = e.target.files[0]; if (!f) return; f.text().then(t => { const s = JSON.parse(t); if (!s.cabins || !s.shifts) throw new Error('This is not a Counselling Planner settings file.'); localStorage.setItem(KEY, JSON.stringify(s)); st.settings = loadSettings(); changed(); toast('Settings imported'); }).catch(x => alert(x.message)); });
+  on('impSet', 'change', e => { const f = e.target.files[0]; if (!f) return; f.text().then(t => { const s = JSON.parse(t); if (!s.cabins || !s.shifts) throw new Error('This is not a Counselling Planner settings file.'); localStorage.setItem(KEY, JSON.stringify(s)); st.settings = loadSettings(); changed(); toast('Settings imported'); T('import_settings', { ok: true }); }).catch(x => alert(x.message)); });
   on('resetSet', 'click', () => { if (!confirm('Reset cabins, periods, rules, teachers and batch buildings to the defaults?')) return; const w = st.settings.weekStart; st.settings = E.defaultSettings(MASTER); st.settings.weekStart = w; changed(); });
   // schedule
   all('[data-view]', b => b.onclick = () => { st.view = b.dataset.view; render(); });
@@ -759,8 +762,9 @@ async function downloadExcel() {
     sheet('Moves and Notes', 'SLOT MOVES AND NOTES', 'Moves were made because a period had more teachers than cabins.', ['Type', 'Detail'], [16, 110],
       st.moves.map(m => ['Moved', `${m.t} (${tName(m.t)}): ${m.from} → ${m.to}`]).concat(st.planWarnings.map(x => ['Note', x]), r.warnings.map(x => ['Note', x]), (r.invalid || []).map(x => ['Check', x])), { left: [1] });
     const buf = await wb.xlsx.writeBuffer();
+    T('download_excel', { ok: true, booked: r.rows.length, slots: st.plan.length });
     await saveFile(`Counselling_Schedule_${s.weekStart}.xlsx`, new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
-  } catch (e) { alert('The Excel file could not be built: ' + e.message); console.error(e); }
+  } catch (e) { T('download_excel', { ok: false }); alert('The Excel file could not be built: ' + e.message); console.error(e); }
   busy(false);
 }
 

@@ -26,3 +26,9 @@ Settings and the last schedule are saved in the browser. Use **Rules and lists â
 
 ## Changing the code
 `source/` holds the editable files. After editing `src.html` or `engine.js`, run `node source/build.js` from inside `source/` and copy `source/dist/index.html` over `index.html`.
+
+## Usage analytics
+The site records usage (opens, who, which buttons and settings, calculations, downloads, errors, time spent) in the Google Sheet "Counselling Planner usage analytics". It sends no file contents, student names, roll numbers or cell values.
+- `source/analytics.js` collects the events. `source/analytics-apps-script.gs` is the receiver, pasted into the sheet's Apps Script and deployed as a web app.
+- The web app URL goes in `source/analytics-url.txt`. Leave the file empty to switch analytics off. Rebuild after changing it.
+
