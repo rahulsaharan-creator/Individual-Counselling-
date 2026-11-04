@@ -225,9 +225,10 @@ dialog form{display:flex;flex-direction:column;height:100%}
 @media (max-width:640px){ .rule{grid-template-columns:auto minmax(0,1fr)} .rule .acts{grid-column:2} .rule .sent select.input,.rule .sent input.input{width:100%!important} }
 @media (max-width:520px){ .grid3{grid-template-columns:1fr 1fr} .calc-label{display:none} }
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
-.who{position:fixed;inset:0;z-index:100;display:grid;place-items:center;background:rgba(0,0,0,.45);padding:16px}
-.who form{background:var(--surface,#fff);color:inherit;max-width:380px;width:100%;padding:24px;border-radius:14px;display:flex;flex-direction:column;gap:12px;box-shadow:0 10px 40px rgba(0,0,0,.3)}
-.who h3{margin:0}.who p{margin:0;opacity:.8}.who input{padding:10px 12px;border:1px solid #8886;border-radius:8px;font:inherit;background:transparent;color:inherit}
+.mcs-who{position:fixed;inset:0;z-index:100;display:grid;place-items:center;background:rgba(0,0,0,.2);padding:16px;box-sizing:border-box}
+.mcs-who *{box-sizing:border-box}
+.mcs-who form{background:var(--surface,#fff);color:var(--ink,inherit);border:1px solid var(--line,#8886);max-width:380px;width:100%;padding:24px;border-radius:14px;display:flex;flex-direction:column;gap:12px;box-shadow:0 10px 40px rgba(0,0,0,.25)}
+.mcs-who h3{margin:0}.mcs-who p{margin:0;color:var(--ink2,inherit)}.mcs-who input{width:100%;padding:10px 12px;border:1px solid var(--line2,#8886);border-radius:8px;font:inherit;background:transparent;color:inherit}
 </style>
 </head>
 <body>
@@ -314,11 +315,11 @@ dialog form{display:flex;flex-direction:column;height:100%}
     var el = e.target.closest && e.target.closest('button, a, summary, label.toggle, [role=button], [data-pid], [data-drop]');
     if (!el) return; clicks++;
     if (el.matches('label.toggle')) return; /* the checkbox change event records it */
-    if (el.closest('.who')) return;
+    if (el.closest('.mcs-who')) return;
     track('click', { feature: featureOf(el) });
   }, true);
   document.addEventListener('change', function (e) {
-    var el = e.target; if (!el || !el.matches || el.type === 'file' || el.closest('.who')) return; /* upload events record files */
+    var el = e.target; if (!el || !el.matches || el.type === 'file' || el.closest('.mcs-who')) return; /* upload events record files */
     var d = {}; if (el.type === 'checkbox') d.on = el.checked;
     var name = featureOf(el);
     if (/^(input|select|textarea)/.test(name)) { var lab = el.closest('label, .field, .row, tr'); name = 'Setting: ' + (lab ? clean(lab.textContent).replace(/\d+/g, '#').slice(0, 40) : name); }
@@ -342,7 +343,7 @@ dialog form{display:flex;flex-direction:column;height:100%}
   function askName(cb) {
     if (!on || ls(UKEY)) return cb();
     var d = document.createElement('div');
-    d.className = 'who';
+    d.className = 'mcs-who';
     d.innerHTML = '<form><h3>Welcome to Counselling Planner</h3><p>Enter your name. It is used only to see who uses the planner and which parts are useful.</p>' +
       '<input required maxlength="60" autocomplete="name" placeholder="Your full name" aria-label="Your full name"><button class="btn primary" type="submit">Continue</button></form>';
     document.body.appendChild(d);

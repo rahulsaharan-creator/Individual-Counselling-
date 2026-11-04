@@ -225,9 +225,10 @@ dialog form{display:flex;flex-direction:column;height:100%}
 @media (max-width:640px){ .rule{grid-template-columns:auto minmax(0,1fr)} .rule .acts{grid-column:2} .rule .sent select.input,.rule .sent input.input{width:100%!important} }
 @media (max-width:520px){ .grid3{grid-template-columns:1fr 1fr} .calc-label{display:none} }
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
-.who{position:fixed;inset:0;z-index:100;display:grid;place-items:center;background:rgba(0,0,0,.45);padding:16px}
-.who form{background:var(--surface,#fff);color:inherit;max-width:380px;width:100%;padding:24px;border-radius:14px;display:flex;flex-direction:column;gap:12px;box-shadow:0 10px 40px rgba(0,0,0,.3)}
-.who h3{margin:0}.who p{margin:0;opacity:.8}.who input{padding:10px 12px;border:1px solid #8886;border-radius:8px;font:inherit;background:transparent;color:inherit}
+.mcs-who{position:fixed;inset:0;z-index:100;display:grid;place-items:center;background:rgba(0,0,0,.2);padding:16px;box-sizing:border-box}
+.mcs-who *{box-sizing:border-box}
+.mcs-who form{background:var(--surface,#fff);color:var(--ink,inherit);border:1px solid var(--line,#8886);max-width:380px;width:100%;padding:24px;border-radius:14px;display:flex;flex-direction:column;gap:12px;box-shadow:0 10px 40px rgba(0,0,0,.25)}
+.mcs-who h3{margin:0}.mcs-who p{margin:0;color:var(--ink2,inherit)}.mcs-who input{width:100%;padding:10px 12px;border:1px solid var(--line2,#8886);border-radius:8px;font:inherit;background:transparent;color:inherit}
 </style>
 </head>
 <body>

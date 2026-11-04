@@ -61,11 +61,11 @@
     var el = e.target.closest && e.target.closest('button, a, summary, label.toggle, [role=button], [data-pid], [data-drop]');
     if (!el) return; clicks++;
     if (el.matches('label.toggle')) return; /* the checkbox change event records it */
-    if (el.closest('.who')) return;
+    if (el.closest('.mcs-who')) return;
     track('click', { feature: featureOf(el) });
   }, true);
   document.addEventListener('change', function (e) {
-    var el = e.target; if (!el || !el.matches || el.type === 'file' || el.closest('.who')) return; /* upload events record files */
+    var el = e.target; if (!el || !el.matches || el.type === 'file' || el.closest('.mcs-who')) return; /* upload events record files */
     var d = {}; if (el.type === 'checkbox') d.on = el.checked;
     var name = featureOf(el);
     if (/^(input|select|textarea)/.test(name)) { var lab = el.closest('label, .field, .row, tr'); name = 'Setting: ' + (lab ? clean(lab.textContent).replace(/\d+/g, '#').slice(0, 40) : name); }
@@ -89,7 +89,7 @@
   function askName(cb) {
     if (!on || ls(UKEY)) return cb();
     var d = document.createElement('div');
-    d.className = 'who';
+    d.className = 'mcs-who';
     d.innerHTML = '<form><h3>Welcome to Counselling Planner</h3><p>Enter your name. It is used only to see who uses the planner and which parts are useful.</p>' +
       '<input required maxlength="60" autocomplete="name" placeholder="Your full name" aria-label="Your full name"><button class="btn primary" type="submit">Continue</button></form>';
     document.body.appendChild(d);
