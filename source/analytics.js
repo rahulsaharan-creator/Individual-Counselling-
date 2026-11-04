@@ -33,6 +33,9 @@
   }
   function flush(beacon) {
     if (!queue.length) return;
+    var who = ls(UKEY) || '';
+    if (!who && !beacon) return; /* wait for the name, unless the page is closing */
+    queue.forEach(function (q) { if (!q.user) q.user = who; });
     var body = JSON.stringify({ events: queue.splice(0) });
     try {
       if (beacon && navigator.sendBeacon && navigator.sendBeacon(ENDPOINT, new Blob([body], { type: 'text/plain' }))) return;
@@ -44,7 +47,11 @@
   var NAMES = { calcBtn: 'Calculate schedule', themeBtn: 'Theme switch', ttFile: 'Upload timetable', recFile: 'Upload student data', clearData: 'Remove uploaded files',
     addCab: 'Add cabin', newCab: 'New cabin name', impB: 'Import room list', impT: 'Import teachers', expSet: 'Export settings', impSet: 'Import settings',
     resetSet: 'Reset everything to defaults', resetRules: 'Restore default rules', optMove: 'Move slots when cabins are full', addSlot: 'Add slot',
-    dl: 'Download Excel', sSearch: 'Student search', restoreAll: 'Put excluded students back', eSave: 'Slot edit: save', eDel: 'Slot edit: remove slot',
+    dl: 'Download Excel', calc3: 'Calculate schedule (Set up page)', calc4: 'Calculate schedule (Weekly schedule page)',
+    optOpp: 'Only in the opposite shift', optRepeat: 'Always a different teacher', weekStart: 'Monday of the week', base: 'Students per slot',
+    addRule: 'Add rule', cg: 'Class groups', kw: 'Counselling keyword', newRed: 'New building reduction', addRed: 'Add building reduction',
+    tFilter: 'Find a teacher', addT: 'Add teacher', bFilter: 'Find a batch', addB: 'Add batch', eT: 'Slot edit: teacher', eD: 'Slot edit: day',
+    eS: 'Slot edit: period', eC: 'Slot edit: cabin', sSearch: 'Student search', restoreAll: 'Put excluded students back', eSave: 'Slot edit: save', eDel: 'Slot edit: remove slot',
     'data-step': 'Step tab', 'data-go': 'Go to step', 'data-view': 'Schedule view', 'data-pid': 'Open slot', 'data-excl': 'Replace student',
     'data-delcab': 'Delete cabin', 'data-rmove': 'Move rule', 'data-rdel': 'Delete rule', 'data-delred': 'Delete building reduction', 'data-delt': 'Delete teacher',
     'data-delb': 'Delete batch building', 'data-use': 'Use period for counselling', 'data-mv': 'Auto-move period', 'data-drop': 'Drop file' };
@@ -59,7 +66,7 @@
   }
   document.addEventListener('click', function (e) {
     var el = e.target.closest && e.target.closest('button, a, summary, label.toggle, [role=button], [data-pid], [data-drop]');
-    if (!el) return; clicks++;
+    if (!el || (e.target.matches && e.target.matches('input[type=file]'))) return; clicks++;
     if (el.matches('label.toggle')) return; /* the checkbox change event records it */
     if (el.closest('.mcs-who')) return;
     track('click', { feature: featureOf(el) });
@@ -93,7 +100,7 @@
     d.innerHTML = '<form><h3>Welcome to Counselling Planner</h3><p>Enter your name. It is used only to see who uses the planner and which parts are useful.</p>' +
       '<input required maxlength="60" autocomplete="name" placeholder="Your full name" aria-label="Your full name"><button class="btn primary" type="submit">Continue</button></form>';
     document.body.appendChild(d);
-    d.querySelector('form').onsubmit = function (e) { e.preventDefault(); var v = clean(d.querySelector('input').value).slice(0, 60); if (!v) return; ls(UKEY, v); d.remove(); track('user_named', {}); cb(); };
+    d.querySelector('form').onsubmit = function (e) { e.preventDefault(); var v = clean(d.querySelector('input').value).slice(0, 60); if (!v) return; ls(UKEY, v); d.remove(); track('user_named', {}); cb(); flush(); };
     setTimeout(function () { d.querySelector('input').focus(); }, 50);
   }
   window.track = track;
