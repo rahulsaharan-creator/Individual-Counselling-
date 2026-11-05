@@ -22,7 +22,16 @@ vercel --prod
 1. **Set up** (one page) – upload this week’s timetable (and the student file when it changes), check the Monday date, cabins and periods, and adjust matching rules, buildings or teachers if anything changed. Use the index on the left to jump between sections.
 2. **Calculate schedule** – the result opens on the **Weekly schedule** page: cabin board, teacher sessions, students, workload and moves. Edit slots, replace students, then **Download Excel**.
 
-Settings and the last schedule are saved in the browser. Use **Rules and lists → Export settings** to copy them to another computer.
+3. **During the week** – reception uses the **Reception** tab to enter each teacher's in and out time, and to mark each student present or absent and whether a parent came. The **Announcements** tab (and sheet) lists students by building, floor, room and batch, for announcements in class.
+4. **End of the week** – **Download report** gives the teacher in-out, student attendance, absent remarks and a weekly summary. On the **Dashboard**, **Save this week to records** adds the counselled students to the records database, so next week books the students still waiting.
+
+How students are matched:
+- Each cabin has a building. When a cabin is in PC, teachers with a class at PC campus just before or after counselling get a PC cabin, with students whose class is at PC.
+- Students only meet a teacher of their class: 11th with 11th and FTP (new) teachers, 12th with 12th, Target with Target. A teacher with no class set and no classes in the timetable is treated as FTP.
+- Senior faculty (12th and Target teachers) are never moved when cabins are full.
+- Every student is counselled once before anyone is booked again. A switch can fill the seats this leaves empty.
+
+Settings, the last schedule, attendance and the counselling records are saved in the browser. Export the records from the Dashboard to keep a copy in Drive. Use **Rules and lists → Export settings** to copy them to another computer.
 
 ## Changing the code
 `source/` holds the editable files. After editing `src.html` or `engine.js`, run `node source/build.js` from inside `source/` and copy `source/dist/index.html` over `index.html`.

@@ -258,7 +258,7 @@ dialog form{display:flex;flex-direction:column;height:100%}
    roll numbers or any cell values. */
 (function () {
   var ENDPOINT = 'https://script.google.com/macros/s/AKfycbzvsFuNKkPP9nNw3Kh1BP9vJPVwKuhgQU3cKst8tYaQYFdxi7ZhsHRo6nL2RHY438JG/exec';
-  var APP_VERSION = '2026-11-04';
+  var APP_VERSION = '2026-11-05';
   var UKEY = 'mcs_planner_user', DKEY = 'mcs_planner_device';
   var on = /^https:\/\/script\.google\.com\//.test(ENDPOINT);
   function ls(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
@@ -385,6 +385,7 @@ dialog form{display:flex;flex-direction:column;height:100%}
     return {
       weekStart: '',
       cabins: ['20', '21', '22'],
+      cabinBuildings: { '20': 'M1', '21': 'M1', '22': 'M1' },
       keyword: 'Counselling',
       shifts: { M1: ['07:00', '08:45'], M2: ['09:00', '10:45'], M3: ['11:00', '12:45'], E1: ['14:00', '15:45'], E2: ['16:00', '17:45'], E3: ['18:00', '19:45'] },
       counselShifts: { M1: false, M2: true, M3: true, E1: false, E2: true, E3: true },
@@ -394,13 +395,19 @@ dialog form{display:flex;flex-direction:column;height:100%}
       knownBuildings: ['M1', 'M2', 'M3', 'M4', 'MHS2', 'GP', 'PC'],
       checks: { M1: { before: '', after: 'M2' }, M2: { before: 'M1', after: 'M3' }, M3: { before: 'M2', after: '' }, E1: { before: '', after: 'E2' }, E2: { before: 'E1', after: 'E3' }, E3: { before: 'E2', after: '' } },
       pcVenueBuilding: 'PC',
-      classGroups: '11th | Target, 12th',
+      classGroups: '11th, FTP | 12th | Target',
+      strictClass: true,
+      onceRound: true,
+      roundTopUp: false,
+      protectSenior: true,
+      seniorClasses: '12th, Target',
       moveOverflow: true,
       noRepeatTeacher: true,
       oppositeShiftOnly: true,
       minGapDays: 0,
       rules: defaultRules(),
       batchBuildings: (master && master.batchBuildings) || {},
+      batchRooms: (master && master.batchRooms) || {},
       teachers: (master && master.teachers) || {}
     };
   }
@@ -495,7 +502,8 @@ dialog form{display:flex;flex-direction:column;height:100%}
     }
     return { records: out, used };
   }
-  function buildStudents(records, weekStart) {
+  // extra: saved counselling records [{roll, date (yyyy-mm-dd), by}] added to the history of known students
+  function buildStudents(records, weekStart, extra) {
     const cut = weekStart ? new Date(weekStart + 'T00:00:00Z') : null;
     const st = new Map();
     for (const rec of records) {
@@ -504,6 +512,10 @@ dialog form{display:flex;flex-direction:column;height:100%}
       if (!s) { s = { roll: rec.roll, name: rec.name, batch: rec.batch, course: rec.course, seen: d, hist: new Map() }; st.set(rec.roll, s); }
       else if (d && (!s.seen || d >= s.seen)) { s.seen = d; s.batch = rec.batch; s.name = rec.name || s.name; s.course = rec.course || s.course; }
       if (d && rec.by && (!cut || d < cut)) s.hist.set(iso(d), rec.by);
+    }
+    for (const x of extra || []) {
+      const s = st.get(S(x.roll)); if (!s || !x.date || (weekStart && x.date >= weekStart)) continue;
+      s.hist.set(x.date, S(x.by));
     }
     for (const s of st.values()) {
       const h = [...s.hist.entries()].sort((a, b) => a[0] < b[0] ? -1 : 1);
@@ -543,13 +555,28 @@ dialog form{display:flex;flex-direction:column;height:100%}
       const k = settings.baseStudents - (bf ? 1 : 0) - (af ? 1 : 0);
       const st = toSec(settings.shifts[sl][0]) + (bf ? unit(sl) : 0);
       const en = af ? st + unit(sl) * k : toSec(settings.shifts[sl][1]);
-      let venue = 'M1 Building';
-      for (const adj of [chk.before, chk.after]) { if (!adj) continue; const e = cell.get(t + '|' + day + '|' + adj); if (e && building(e.room) === settings.pcVenueBuilding) { venue = 'PC Campus'; break; } }
-      return { k, start: st, end: en, rule: why.join('; ') || 'No reduction', venue };
+      let venue = 'M1 Building', pc = false;
+      for (const adj of [chk.before, chk.after]) { if (!adj) continue; const e = cell.get(t + '|' + day + '|' + adj); if (e && building(e.room) === settings.pcVenueBuilding) { venue = 'PC Campus'; pc = true; break; } }
+      return { k, start: st, end: en, rule: why.join('; ') || 'No reduction', venue, pc, site: split ? (pc ? 'PC' : 'Main') : 'All' };
     }
     const teacherFree = (t, day, sl) => !cell.has(t + '|' + day + '|' + sl);
-    return { cell, occ, isCounsel, isDoubt, building, compute, teacherFree, unit };
+    // cabins and campuses: when at least one cabin is in the PC building, PC and the main campus are planned separately
+    const cabinsAll = settings.cabins.filter(Boolean);
+    const cabinBld = c => S((settings.cabinBuildings || {})[c]);
+    const split = !!settings.pcVenueBuilding && cabinsAll.some(c => cabinBld(c) === settings.pcVenueBuilding);
+    const siteOfCabin = c => !split ? 'All' : cabinBld(c) === settings.pcVenueBuilding ? 'PC' : 'Main';
+    const cabinsFor = site => cabinsAll.filter(c => siteOfCabin(c) === site);
+    const siteOfBatch = b => !split ? 'All' : building(b) === settings.pcVenueBuilding ? 'PC' : 'Main';
+    // teacher class: from the teacher list; a teacher with no class set and no classes this week is a new (FTP) teacher
+    const teaching = new Set(); for (const e of tt.entries) if (e.room && !isCounsel(e) && !isDoubt(e.room)) teaching.add(e.t);
+    const setCls = t => S((settings.teachers[t] || {}).cls);
+    const tClass = t => setCls(t) || (teaching.has(t) ? '' : 'FTP');
+    const inferredFTP = t => !setCls(t) && !teaching.has(t);
+    const senior = new Set(list(settings.seniorClasses || ''));
+    const isSenior = t => settings.protectSenior !== false && senior.has(tClass(t));
+    return { cell, occ, isCounsel, isDoubt, building, compute, teacherFree, unit, split, cabinsAll, cabinBld, siteOfCabin, cabinsFor, siteOfBatch, tClass, inferredFTP, isSenior };
   }
+  const SITE_NAME = { PC: 'PC campus', Main: 'the main campus', All: 'any building' };
 
   function workload(tt, ctx, plan) {
     const w = {};
@@ -570,24 +597,35 @@ dialog form{display:flex;flex-direction:column;height:100%}
     let plan = tt.entries.filter(e => ctx.isCounsel(e) && SH.includes(e.slot))
       .map((e, i) => ({ id: 'p' + i, t: e.t, origDay: e.day, origShift: e.slot, day: e.day, shift: e.slot, label: e.room || e.subj, moved: false, manual: false }));
     tt.entries.filter(e => ctx.isCounsel(e) && !SH.includes(e.slot)).forEach(e => warnings.push(`${e.t} has a counselling cell on ${e.day} ${e.slot}, but ${e.slot} is switched off for counselling, so it was skipped.`));
-    const at = (d, s) => plan.filter(p => p.day === d && p.shift === s);
-    const moves = [];
+    plan.forEach(p => { p.site = ctx.compute(p.t, p.day, p.shift).site; });
+    const at = (d, s, site) => plan.filter(p => p.day === d && p.shift === s && p.site === site);
+    const cap = site => ctx.cabinsFor(site).length;
+    const SITES = ctx.split ? ['Main', 'PC'] : ['All'];
+    const moves = [], stuck = new Set();
     if (settings.moveOverflow) {
       for (let guard = 0; guard < 500; guard++) {
         let over = null;
-        for (const d of DAYS) for (const s of SH) if (!over && at(d, s).length > cabins.length) over = [d, s];
+        for (const d of DAYS) for (const s of SH) for (const site of SITES) if (!over && !stuck.has(d + s + site) && at(d, s, site).length > cap(site)) over = [d, s, site];
         if (!over) break;
-        const [d, s] = over; let best = null;
-        for (const p of at(d, s)) for (const d2 of DAYS) for (const s2 of MV) {
-          if ((d2 === d && s2 === s) || at(d2, s2).length >= cabins.length || !ctx.teacherFree(p.t, d2, s2)) continue;
+        const [d, s, site] = over; let best = null; const here = at(d, s, site); const movable = here.filter(p => !ctx.isSenior(p.t));
+        for (const p of movable) for (const d2 of DAYS) for (const s2 of MV) {
+          if ((d2 === d && s2 === s) || !ctx.teacherFree(p.t, d2, s2)) continue;
           if (plan.some(q => q.t === p.t && q.day === d2 && q.shift === s2)) continue;
+          const c2 = ctx.compute(p.t, d2, s2); if (at(d2, s2, c2.site).length >= cap(c2.site)) continue;
           const same = plan.some(q => q !== p && q.t === p.t && q.day === d2) ? 1 : 0;
-          const key = [Math.abs(DAYS.indexOf(d2) - DAYS.indexOf(d)), same, -ctx.compute(p.t, d2, s2).k, DAYS.indexOf(d2), SLOTS.indexOf(s2), p.t];
-          if (!best || cmp(key, best.key) < 0) best = { key, p, d2, s2 };
+          const key = [Math.abs(DAYS.indexOf(d2) - DAYS.indexOf(d)), same, -c2.k, DAYS.indexOf(d2), SLOTS.indexOf(s2), p.t];
+          if (!best || cmp(key, best.key) < 0) best = { key, p, d2, s2, site2: c2.site };
         }
-        if (!best) { warnings.push(`${d} ${s} has ${at(d, s).length} teachers but only ${cabins.length} cabins, and no free cabin fits their timetables. Move one manually.`); break; }
+        if (!best) {
+          stuck.add(d + s + site);
+          const where = ctx.split ? ` at ${SITE_NAME[site]}` : '';
+          if (!cap(site)) warnings.push(`${d} ${s}: ${here.length} teachers need a cabin${where}, but no cabin is set in that building. Add a cabin there or move them manually.`);
+          else if (!movable.length) warnings.push(`${d} ${s} has ${here.length} teachers for ${cap(site)} cabins${where}. All of them are senior faculty (${settings.seniorClasses}), who are never moved automatically. Move one manually or add a cabin.`);
+          else warnings.push(`${d} ${s} has ${here.length} teachers but only ${cap(site)} cabins${where}, and no free cabin fits their timetables. Move one manually.`);
+          continue;
+        }
         moves.push({ t: best.p.t, from: `${d} ${s}`, to: `${best.d2} ${best.s2}` });
-        Object.assign(best.p, { day: best.d2, shift: best.s2, moved: true });
+        Object.assign(best.p, { day: best.d2, shift: best.s2, moved: true, site: best.site2 });
       }
     }
     plan = finalizePlan(plan, tt, settings);
@@ -597,19 +635,24 @@ dialog form{display:flex;flex-direction:column;height:100%}
 
   /* assign cabins (respecting manual cabins), counts, times, dates */
   function finalizePlan(plan, tt, settings) {
-    const ctx = makeCtx(tt, settings); const cabins = settings.cabins.filter(Boolean);
+    const ctx = makeCtx(tt, settings); const cabins = ctx.cabinsAll;
+    for (const p of plan) p.site = ctx.compute(p.t, p.day, p.shift).site;
     for (const d of DAYS) for (const s of SLOTS) {
       const here = plan.filter(p => p.day === d && p.shift === s);
-      const taken = new Set(here.filter(p => p.manual && p.cabin && cabins.includes(p.cabin)).map(p => p.cabin));
-      const free = cabins.filter(c => !taken.has(c));
-      here.filter(p => !(p.manual && p.cabin && cabins.includes(p.cabin))).sort((a, b) => a.t < b.t ? -1 : 1)
-        .forEach(p => { p.cabin = free.shift() || ''; });
+      const fixed = p => p.manual && p.cabin && cabins.includes(p.cabin);
+      const taken = new Set(here.filter(fixed).map(p => p.cabin));
+      for (const site of ['All', 'Main', 'PC']) {
+        const free = ctx.cabinsFor(site).filter(c => !taken.has(c));
+        here.filter(p => !fixed(p) && p.site === site).sort((a, b) => a.t < b.t ? -1 : 1).forEach(p => { p.cabin = free.shift() || ''; });
+      }
     }
     for (const p of plan) {
       const c = ctx.compute(p.t, p.day, p.shift);
       p.k = p.manualK != null ? p.manualK : c.k; p.start = c.start; p.end = p.manualK != null ? c.start + ctx.unit(p.shift) * p.manualK : c.end;
       if (p.manualK == null) p.end = c.end;
-      p.rule = p.manualK != null ? `Set manually to ${p.manualK}` : `${c.k} students · ${c.rule}`; p.venue = c.venue;
+      p.rule = p.manualK != null ? `Set manually to ${p.manualK}` : `${c.k} students · ${c.rule}`;
+      p.building = p.cabin ? ctx.cabinBld(p.cabin) : '';
+      p.venue = p.building ? (p.building === settings.pcVenueBuilding ? 'PC Campus' : p.building + ' Building') : c.venue;
       p.date = settings.weekStart ? addDays(settings.weekStart, DAYS.indexOf(p.day)) : '';
       p.unit = ctx.unit(p.shift);
     }
@@ -625,6 +668,10 @@ dialog form{display:flex;flex-direction:column;height:100%}
       const seen = {}; here.forEach(p => { if (p.cabin) { if (seen[p.cabin]) out.push(`${d} ${s}: cabin ${p.cabin} has both ${seen[p.cabin]} and ${p.t}.`); seen[p.cabin] = p.t; } else out.push(`${d} ${s}: ${p.t} has no cabin.`); });
     }
     for (const p of plan) if (p.moved || p.manual) { const e = ctx.cell.get(p.t + '|' + p.day + '|' + p.shift); if (e && !ctx.isCounsel(e)) out.push(`${p.t} has a class (${e.subj} ${e.room}) on ${p.day} ${p.shift}, the time of their counselling slot.`); }
+    if (ctx.split) for (const p of plan) {
+      if (!p.cabin) continue; const want = ctx.compute(p.t, p.day, p.shift).site, got = ctx.siteOfCabin(p.cabin);
+      if (want !== got) out.push(`${p.t} on ${p.day} ${p.shift} should be at ${SITE_NAME[want]}${want === 'PC' ? ' (class there just before or after)' : ''}, but cabin ${p.cabin} is in ${ctx.cabinBld(p.cabin) || 'no building'}.`);
+    }
     return out;
   }
 
@@ -633,11 +680,11 @@ dialog form{display:flex;flex-direction:column;height:100%}
     const ctx = makeCtx(tt, settings);
     const groups = settings.classGroups.split('|').map(g => g.split(',').map(S).filter(Boolean));
     const groupOf = cls => { const i = groups.findIndex(g => g.includes(cls)); return i < 0 ? 'cls:' + cls : 'g' + i; };
-    const tcls = t => (settings.teachers[t] && settings.teachers[t].cls) || '';
-    // batch class = majority class of teachers teaching its regular classes
+    const tcls = ctx.tClass;
+    // batch class = majority class of teachers teaching its regular classes (FTP teachers do not vote)
     const votes = {};
     for (const e of tt.entries) {
-      if (!e.room || ctx.isCounsel(e) || ctx.isDoubt(e.room)) continue; const c = tcls(e.t); if (!c) continue;
+      if (!e.room || ctx.isCounsel(e) || ctx.isDoubt(e.room)) continue; const c = tcls(e.t); if (!c || c === 'FTP') continue;
       (votes[e.room] = votes[e.room] || {})[c] = (votes[e.room][c] || 0) + 1;
     }
     const batchCls = {}; for (const b in votes) batchCls[b] = Object.entries(votes[b]).sort((a, b2) => b2[1] - a[1])[0][0];
@@ -651,22 +698,35 @@ dialog form{display:flex;flex-direction:column;height:100%}
     const freeAt = (b, d, sl) => ctx.occ.has(b) && !ctx.occ.get(b).has(d + '|' + sl) && (!opposite || !classShifts.get(b).has(sl[0]));
     const direct = {};
     for (const e of tt.entries) if (e.room && !ctx.isCounsel(e) && !ctx.isDoubt(e.room)) (direct[e.t] = direct[e.t] || new Set()).add(e.room);
-    const used = new Set(); const assign = []; let repeatSkips = 0, gapSkips = 0; const count = new Map();
+    const used = new Set(); const assign = []; let repeatSkips = 0, gapSkips = 0, roundSkips = 0, classSkips = 0; const count = new Map();
     const gapCut = settings.minGapDays > 0 && settings.weekStart ? addDays(settings.weekStart, -settings.minGapDays) : '';
     const shiftOf = b => { let m = 0, e = 0; (ctx.occ.get(b) || []).forEach(k => k.split('|')[1][0] === 'M' ? m++ : e++); return m >= e ? 'Morning' : 'Evening'; };
+    const allB = [...byBatch.keys()].filter(b => ctx.occ.has(b));
+    // students only meet a teacher of their own class group (11th with 11th and FTP, 12th with 12th, Target with Target by default)
+    const classOk = (b, t) => settings.strictClass === false || !tcls(t) || !batchCls[b] || groupOf(tcls(t)) === groupOf(batchCls[b]);
+    const placeOk = (b, p) => ctx.siteOfBatch(b) === p.site;
+    // rounds: nobody is counselled again until every student who can be reached this week has been counselled as often
+    const reachable = allB.filter(b => plan.some(p => freeAt(b, p.day, p.shift) && placeOk(b, p)));
+    const activeStu = reachable.flatMap(b => byBatch.get(b) || []);
+    const minTimes = activeStu.length ? Math.min(...activeStu.map(s => s.times)) : 0;
+    const roundOn = settings.onceRound !== false; let roundGate = true;
     function fill(p, batches, basis) {
       const pool = [];
-      for (const b of batches) if (freeAt(b, p.day, p.shift)) for (const s of (byBatch.get(b) || [])) pool.push(s);
-      pool.sort((a, b) => (a.last || '') < (b.last || '') ? -1 : (a.last || '') > (b.last || '') ? 1 : a.batch < b.batch ? -1 : a.batch > b.batch ? 1 : a.roll < b.roll ? -1 : 1);
+      for (const b of batches) {
+        if (!freeAt(b, p.day, p.shift) || !placeOk(b, p)) continue;
+        if (!classOk(b, p.t)) { classSkips++; continue; }
+        for (const s of (byBatch.get(b) || [])) pool.push(s);
+      }
+      pool.sort((a, b) => a.times - b.times || ((a.last || '') < (b.last || '') ? -1 : (a.last || '') > (b.last || '') ? 1 : a.batch < b.batch ? -1 : a.batch > b.batch ? 1 : a.roll < b.roll ? -1 : 1));
       for (const s of pool) {
         if ((count.get(p.id) || 0) >= p.k) return;
         if (used.has(s.roll)) continue;
+        if (roundOn && roundGate && s.times > minTimes) { roundSkips++; continue; }
         if (gapCut && s.last && s.last >= gapCut) { gapSkips++; continue; }
         if (settings.noRepeatTeacher && s.teachersSeen.has(p.t)) { repeatSkips++; continue; }
         used.add(s.roll); count.set(p.id, (count.get(p.id) || 0) + 1); assign.push({ pid: p.id, s, basis });
       }
     }
-    const allB = [...byBatch.keys()].filter(b => ctx.occ.has(b));
     const tMatch = (r, t) => {
       const v = list(r.tValue);
       if (r.tType === 'class') return v.includes(tcls(t));
@@ -688,15 +748,27 @@ dialog form{display:flex;flex-direction:column;height:100%}
     };
     const rules = (settings.rules && settings.rules.length ? settings.rules : defaultRules()).filter(r => r.on);
     for (const r of rules) for (const p of plan) if (tMatch(r, p.t)) fill(p, pool(r, p.t), r.name || 'Rule');
+    // optional second pass: seats still empty go to the students counselled longest ago
+    if (roundOn && settings.roundTopUp) { roundGate = false; for (const r of rules) for (const p of plan) if (tMatch(r, p.t)) fill(p, pool(r, p.t), (r.name || 'Rule') + ' (empty seat)'); }
     // times
     const byP = {}; assign.forEach(a => (byP[a.pid] = byP[a.pid] || []).push(a));
     const pm = Object.fromEntries(plan.map(p => [p.id, p]));
     const rows = [];
     for (const pid in byP) byP[pid].sort((a, b) => a.s.roll < b.s.roll ? -1 : 1).forEach((a, i) => { const p = pm[pid]; rows.push({ ...a, p, time: hm(p.start + p.unit * i), batchShift: shiftOf(a.s.batch) }); });
     rows.sort((a, b) => cmp([DAYS.indexOf(a.p.day), SLOTS.indexOf(a.p.shift), a.p.cabin, a.time], [DAYS.indexOf(b.p.day), SLOTS.indexOf(b.p.shift), b.p.cabin, b.time]));
-    const short = plan.filter(p => (count.get(p.id) || 0) < p.k).map(p => `${p.t} on ${p.day} ${p.shift}: ${count.get(p.id) || 0} of ${p.k} seats filled (not enough free students who haven't met this teacher).`);
-    const noCls = [...new Set(plan.filter(p => !tcls(p.t)).map(p => p.t))].map(t => `${t} has no class (11th / Target / 12th) in the teacher list, so only students of batches they teach could be matched.`);
-    return { rows, repeatSkips, gapSkips, warnings: [...noCls, ...short], counts: Object.fromEntries(plan.map(p => [p.id, count.get(p.id) || 0])) };
+    const why = ['not enough free students of this class' + (ctx.split ? ' and campus' : '')].concat(settings.noRepeatTeacher ? ['who haven’t met this teacher'] : [], roundOn ? [`and still due this round`] : []).join(' ');
+    const short = plan.filter(p => (count.get(p.id) || 0) < p.k).map(p => `${p.t} on ${p.day} ${p.shift}${ctx.split ? ` (${SITE_NAME[p.site]})` : ''}: ${count.get(p.id) || 0} of ${p.k} seats filled (${why}).`);
+    const noCls = [...new Set(plan.filter(p => !tcls(p.t)).map(p => p.t))].map(t => `${t} has no class (11th / 12th / Target / FTP) in the teacher list, so only students of batches they teach could be matched.`);
+    const ftp = [...new Set(plan.filter(p => ctx.inferredFTP(p.t)).map(p => p.t))];
+    const ftpNote = ftp.length ? [`Treated as FTP (new teachers, no classes this week, counselling 11th students): ${ftp.join(', ')}. Set their class in the teacher list to change this.`] : [];
+    // coverage of all students in this week's batches, before this week
+    const cov = { active: 0, done: 0, byClass: {} };
+    for (const b of allB) for (const s of byBatch.get(b) || []) {
+      const c = batchCls[b] || 'Not known', x = cov.byClass[c] || (cov.byClass[c] = { active: 0, done: 0, roundDone: 0 });
+      cov.active++; x.active++; if (s.times > 0) { cov.done++; x.done++; } if (s.times > minTimes) x.roundDone++;
+    }
+    cov.round = minTimes + 1; cov.roundDone = activeStu.filter(s => s.times > minTimes).length; cov.reachable = activeStu.length;
+    return { rows, repeatSkips, gapSkips, roundSkips, classSkips, minTimes, coverage: cov, batchCls, warnings: [...ftpNote, ...noCls, ...short], counts: Object.fromEntries(plan.map(p => [p.id, count.get(p.id) || 0])) };
   }
 
   const api = { DAYS, SLOTS, COUNSEL_SHIFTS, activeShifts, defaultRules, defaultSettings, parseTimetable, parseStudents, buildStudents, buildPlan, finalizePlan, validatePlan, assignStudents, workload, makeCtx, hm, addDays };
@@ -705,7 +777,7 @@ dialog form{display:flex;flex-direction:column;height:100%}
 </script>
 <script>
 const T = (e, d) => { try { window.track && window.track(e, d); } catch (x) {} };
-const MASTER = {"batchBuildings":{"R1":"GP","R4":"GP","R5":"GP","RH2":"GP","S1":"GP","XH2":"M1","ZA2":"M2","I0B":"M2","P1":"M2","CE1":"M2","DE2":"M2","DE4":"M2","CH1":"M2","YA2":"M3","YA1":"M3","BE3":"M3","BH1":"M3","XD1":"M3","XE4":"M3","YC3":"M3","BE1":"M3","XA1":"M3","XE1":"M3","AH1":"M3 old","XD4":"M3 old","IH New":"M3 old","XF3":"M3 old","IEN1":"M3 old","AE2":"M3 old","XF2":"M3 old","XG2":"M3 old","XG1":"M3 old","PR1":"M4","Q0":"M4","PR3":"M4","YC1":"M4","PC1":"M4","ZA1":"M4","PC3":"M4","YD2":"M4","IH1":"MHS2","XH1":"MHS2","XH5":"MHS2","XC1":"PC","XB2":"PC","YB1":"PC","ZA3":"GP","R2":"GP","R7":"GP","R3":"GP","R6":"GP","XH6":"M1","DE0":"M1","YH2":"M2","ZA4":"M2","DH1":"M2","DE3":"M2","DE5":"M2","AE1":"M2","CE2":"M2","CE3":"M2","DE1":"M2","YA3":"M3","XG4":"M3","AE3":"M3","AH2":"M3","YA4":"M3","XG3":"M3","XF1":"M3","BE2":"M3","BH2":"M3","XF4":"M3","YC2":"M3","RH3":"M3 old","RH1":"M3 old","IEN2":"M3 old","XA2":"M3 old","XD2":"M3 old","S2":"M3 old","S3":"M3 old","XD3":"M3 old","XE2":"M3 old","XE3":"M3 old","PR2":"M4","P0":"M4","PR4":"M4","YC4":"M4","PC2":"M4","YD1":"M4","XH3":"M4","YD3":"M4","DH0":"MHS2","X1":"MHS2","XH4":"MHS2","YH3":"MHS2","YH1":"MHS2","XB3":"PC","XB1":"PC","XC2":"PC","XC3":"PC","YB2":"PC","ZB1":"PC","I0A":"M1"},"teachers":{"AA":{"name":"Anupam Agarwal","subject":"Physics","cls":"Target"},"AB":{"name":"Amit Kumar","subject":"Chemistry","cls":"11th"},"ABC":{"name":"Abhay Choudhary","subject":"Chemistry","cls":"Target"},"ABG":{"name":"Abhishek Gora","subject":"Physics","cls":"11th"},"ABR":{"name":"Amit Baberwal","subject":"Maths","cls":"11th"},"ADC":{"name":"Aditya Choudhary","subject":"Maths","cls":"11th"},"ADS":{"name":"Aditya Sharma","subject":"Physics","cls":"11th"},"ADW":{"name":"Anirudh Walia","subject":"Chemistry","cls":"Target"},"AG":{"name":"Anil Gora","subject":"Maths","cls":"Target"},"AGS":{"name":"Abhishek Goswami","subject":"Physics","cls":"12th"},"AJC":{"name":"Ajeet Singh Choudhary","subject":"Maths","cls":"Target"},"AJK":{"name":"Ajin A.K","subject":"Chemistry","cls":"11th"},"AKH":{"name":"Akash Bashir","subject":"Physics","cls":"11th"},"AKJ":{"name":"Ankit Jangir","subject":"Maths","cls":"11th"},"AKR":{"name":"Ajay Kumar","subject":"Chemistry","cls":"12th"},"AKY":{"name":"Abhishek","subject":"Chemistry","cls":"11th"},"ALK":{"name":"Alok Kumar","subject":"Chemistry","cls":"11th"},"AMG":{"name":"Amit Goplani","subject":"Maths","cls":"12th"},"ANB":{"name":"Anmol Bhargava","subject":"Physics","cls":"12th"},"ANC":{"name":"Aman Chaudhary","subject":"Physics","cls":"Target"},"ANK":{"name":"Ankur Kishlay","subject":"Physics","cls":"Target"},"CDM":{"name":"Chaitanya Maharishi","subject":"Chemistry","cls":"12th"},"DJ":{"name":"Deepak Jhajharia","subject":"Chemistry","cls":"Target"},"DJP":{"name":"Dhananjay Pradhan","subject":"Maths","cls":"12th"},"DKJ":{"name":"Deepak Joshi","subject":"Physics","cls":"11th"},"DP":{"name":"Deepak Poonia","subject":"Chemistry","cls":"Target"},"DVS":{"name":"Divesh Sharma","subject":"Physics","cls":"11th"},"GRV":{"name":"Gaurav Vyas","subject":"Physics","cls":"11th"},"JPS":{"name":"Jaspreet Singh","subject":"Maths","cls":"Target"},"JTR":{"name":"Jitendra Kumar","subject":"Physics","cls":"11th"},"KD":{"name":"Kuldeep Khichar","subject":"Physics","cls":"Target"},"KGB":{"name":"Krishna Gopal","subject":"Maths","cls":"12th"},"KGT":{"name":"Kavindra Gautam","subject":"Chemistry","cls":"11th"},"KM":{"name":"Kamal Gora","subject":"Chemistry","cls":"12th"},"KNG":{"name":"Kuldeep Nagar","subject":"Chemistry","cls":"11th"},"KT":{"name":"Kamesh Tanwar","subject":"Chemistry","cls":"Target"},"LKS":{"name":"Lakhan Sharma","subject":"Chemistry","cls":"11th"},"MDS":{"name":"Mohammed Sabi","subject":"Maths","cls":"11th"},"MHR":{"name":"Hafizurrehman","subject":"Physics","cls":"11th"},"MJ":{"name":"Manish","subject":"Chemistry","cls":"Target"},"MJR":{"name":"Manoj Kumar","subject":"Chemistry","cls":"11th"},"MKS":{"name":"Mahendra Kumar Sharma","subject":"Chemistry","cls":"11th"},"MM":{"name":"Mahaveer Singh","subject":"Chemistry","cls":"12th"},"MNK":{"name":"Manish Kumawat","subject":"Physics","cls":"12th"},"MNR":{"name":"Mana Ram","subject":"Chemistry","cls":"11th"},"MP":{"name":"Mukesh Prajapat","subject":"Chemistry","cls":"12th"},"MPN":{"name":"Mohit Kumar Poonia","subject":"Maths","cls":"11th"},"MRG":{"name":"Manish Raghuvanshi","subject":"Maths","cls":"11th"},"MS":{"name":"Mahendra Singh","subject":"Maths","cls":"12th"},"MSA":{"name":"Mohd.Sadiq Ansari","subject":"Physics","cls":"Target"},"MSD":{"name":"Mahesh Kumar Dhayal","subject":"Physics","cls":"12th"},"MY":{"name":"Mukesh Yadav","subject":"Chemistry","cls":"Target"},"NK":{"name":"Narendra Kok","subject":"Chemistry","cls":"12th"},"NKB":{"name":"Nikhil Basal","subject":"Maths","cls":"Target"},"NPK":{"name":"Nirmal Pathak","subject":"Maths","cls":"11th"},"NTS":{"name":"Nishant Sharma","subject":"Chemistry","cls":"12th"},"NVK":{"name":"Naveen Kumar Kumawat","subject":"Maths","cls":"11th"},"OM":{"name":"Om Prakash","subject":"Physics","cls":"11th"},"PK":{"name":"Pawan Kumawat","subject":"Physics","cls":"12th"},"PKD":{"name":"Pawan Khod","subject":"Chemistry","cls":"12th"},"PKR":{"name":"Pankaj Yadav","subject":"Chemistry","cls":"11th"},"PKV":{"name":"Prateek Verma","subject":"Maths","cls":"11th"},"PMD":{"name":"Preetam Kumar Dotasra","subject":"Chemistry","cls":"11th"},"PMK":{"name":"Parmeshwar Lal Keelka","subject":"Chemistry","cls":"11th"},"PML":{"name":"Pramod Malviya","subject":"Maths","cls":"11th"},"PRA":{"name":"Prashant Sharma","subject":"Physics","cls":"11th"},"PRD":{"name":"Pradyumna Singh Shekhawat","subject":"Physics","cls":"11th"},"PRJ":{"name":"Pukhraj Jyani","subject":"Maths","cls":"Target"},"PRK":{"name":"Prakash Dan","subject":"Physics","cls":"Target"},"PRN":{"name":"Praveen Saini","subject":"Maths","cls":"11th"},"PRS":{"name":"Prateek Sharma","subject":"Maths","cls":"12th"},"PWS":{"name":"Pawan Saini","subject":"Maths","cls":"11th"},"RAM":{"name":"Ram Singh Choudhary","subject":"Physics","cls":"12th"},"RB":{"name":"Rajendra Burdak","subject":"Maths","cls":"12th"},"RG":{"name":"Rohit Goyal","subject":"Physics","cls":"12th"},"RJ":{"name":"Rajendra Kumar","subject":"Maths","cls":"12th"},"RKG":{"name":"Rakesh Gurjar","subject":"Chemistry","cls":"11th"},"RKM":{"name":"Rohitash Kumar","subject":"Maths","cls":"12th"},"RKT":{"name":"Rahul Kumawat","subject":"Maths","cls":"11th"},"RLP":{"name":"Rahul Poonia","subject":"Chemistry","cls":"Target"},"RLS":{"name":"Rahul Sharma","subject":"Chemistry","cls":"11th"},"RNT":{"name":"Ranjeet Singh","subject":"Physics","cls":"11th"},"RS":{"name":"Rishabh Sharma","subject":"Maths","cls":"12th"},"RSM":{"name":"Rishabh Semwal","subject":"Physics","cls":"11th"},"RVK":{"name":"Ravikumar Vishwakarma","subject":"Maths","cls":"11th"},"RVM":{"name":"Ravi Mahala","subject":"Maths","cls":"11th"},"SBM":{"name":"Shubham Sharma","subject":"Chemistry","cls":"11th"},"SDS":{"name":"Sidharth Singh","subject":"Physics","cls":"11th"},"SHB":{"name":"Shubham Budania","subject":"Physics","cls":"11th"},"SHG":{"name":"Shubham Goyal","subject":"Physics","cls":"11th"},"SID":{"name":"Siddarth Gora","subject":"Physics","cls":"12th"},"SK":{"name":"Sandeep","subject":"Physics","cls":"11th"},"SKR":{"name":"Sunil Kumar","subject":"Physics","cls":"12th"},"SMC":{"name":"Sameer Choudhari","subject":"Chemistry","cls":"11th"},"SMK":{"name":"Sumit Kulhria","subject":"Physics","cls":"Target"},"SNG":{"name":"Subhash Nagar","subject":"Maths","cls":"11th"},"SNK":{"name":"Sunil Kumar Jat","subject":"Chemistry","cls":"11th"},"SNY":{"name":"Sunil Yadav","subject":"Maths","cls":"11th"},"SOM":{"name":"Somraj Chopra","subject":"Physics","cls":"11th"},"SR":{"name":"Sushil Kumar","subject":"Maths","cls":"Target"},"SSF":{"name":"Saunu Singh Faujdar","subject":"Chemistry","cls":"Target"},"SSG":{"name":"Saurabh Singh","subject":"Maths","cls":"11th"},"SSL":{"name":"Shailendra Singh Lodhi","subject":"Chemistry","cls":"11th"},"SSN":{"name":"Shiv Kumar Sain","subject":"Maths","cls":"Target"},"TKD":{"name":"Tarun Kumar Dhabai","subject":"Chemistry","cls":"12th"},"UJ":{"name":"Utsav Jangir","subject":"Physics","cls":"12th"},"VC":{"name":"Vikash Choudhary","subject":"Maths","cls":"12th"},"VDS":{"name":"Vasudev Saini","subject":"Maths","cls":"Target"},"VJC":{"name":"Vijendra Choudhary","subject":"Physics","cls":"11th"},"VKB":{"name":"Vikash Kumar Bhamu","subject":"Chemistry","cls":"Target"},"VKJ":{"name":"Vinod Kumar","subject":"Chemistry","cls":"Target"},"VKK":{"name":"Vikash Kumar","subject":"Physics","cls":"11th"},"VKP":{"name":"Vikram Kumar Pareta","subject":"Maths","cls":"11th"},"VMS":{"name":"Vikram Singh","subject":"Chemistry","cls":"12th"},"VNG":{"name":"Vinay Singh","subject":"Maths","cls":"11th"},"VNM":{"name":"Vinayak Maheshwari","subject":"Physics","cls":"11th"},"VSK":{"name":"Vikash","subject":"Physics","cls":"11th"},"VVS":{"name":"Vivek Saini","subject":"Maths","cls":"Target"},"YKM":{"name":"Yogesh Kumar Meena","subject":"Chemistry","cls":"11th"},"SMR":{"name":"Sameer Choudhari","subject":"Chemistry","cls":"11th"},"VKS":{"name":"Vikas Singar","subject":"Physics","cls":"11th"},"ARV":{"name":"Arvind Verma","subject":"Physics","cls":"11th"},"NKG":{"name":"Nikhil Garg","subject":"Physics","cls":"11th"},"BPK":{"name":"Bhupesh Verma","subject":"Physics","cls":"11th"}}};
+const MASTER = {"batchBuildings":{"R1":"GP","R4":"GP","R5":"GP","RH2":"GP","S1":"GP","XH2":"M1","ZA2":"M2","I0B":"M2","P1":"M2","CE1":"M2","DE2":"M2","DE4":"M2","CH1":"M2","YA2":"M3","YA1":"M3","BE3":"M3","BH1":"M3","XD1":"M3","XE4":"M3","YC3":"M3","BE1":"M3","XA1":"M3","XE1":"M3","AH1":"M3 old","XD4":"M3 old","IH New":"M3 old","XF3":"M3 old","IEN1":"M3 old","AE2":"M3 old","XF2":"M3 old","XG2":"M3 old","XG1":"M3 old","PR1":"M4","Q0":"M4","PR3":"M4","YC1":"M4","PC1":"M4","ZA1":"M4","PC3":"M4","YD2":"M4","IH1":"MHS2","XH1":"MHS2","XH5":"MHS2","XC1":"PC","XB2":"PC","YB1":"PC","ZA3":"GP","R2":"GP","R7":"GP","R3":"GP","R6":"GP","XH6":"M1","DE0":"M1","YH2":"M2","ZA4":"M2","DH1":"M2","DE3":"M2","DE5":"M2","AE1":"M2","CE2":"M2","CE3":"M2","DE1":"M2","YA3":"M3","XG4":"M3","AE3":"M3","AH2":"M3","YA4":"M3","XG3":"M3","XF1":"M3","BE2":"M3","BH2":"M3","XF4":"M3","YC2":"M3","RH3":"M3 old","RH1":"M3 old","IEN2":"M3 old","XA2":"M3 old","XD2":"M3 old","S2":"M3 old","S3":"M3 old","XD3":"M3 old","XE2":"M3 old","XE3":"M3 old","PR2":"M4","P0":"M4","PR4":"M4","YC4":"M4","PC2":"M4","YD1":"M4","XH3":"M4","YD3":"M4","DH0":"MHS2","X1":"MHS2","XH4":"MHS2","YH3":"MHS2","YH1":"MHS2","XB3":"PC","XB1":"PC","XC2":"PC","XC3":"PC","YB2":"PC","ZB1":"PC","I0A":"M1","RR1":"GP","RR5":"GP","RR3":"GP","RR2":"GP","RR7":"M3 old","RR6":"M3 old","RR4":"GP","RC1":"GP","RB1":"M2","CB1":"M2","Y1":"M3","IHN1":"M3 old"},"teachers":{"AA":{"name":"Anupam Agarwal","subject":"Physics","cls":"Target"},"AB":{"name":"Amit Kumar","subject":"Chemistry","cls":"11th"},"ABC":{"name":"Abhay Choudhary","subject":"Chemistry","cls":"Target"},"ABG":{"name":"Abhishek Gora","subject":"Physics","cls":"11th"},"ABR":{"name":"Amit Baberwal","subject":"Maths","cls":"11th"},"ADC":{"name":"Aditya Choudhary","subject":"Maths","cls":"11th"},"ADS":{"name":"Aditya Sharma","subject":"Physics","cls":"11th"},"ADW":{"name":"Anirudh Walia","subject":"Chemistry","cls":"Target"},"AG":{"name":"Anil Gora","subject":"Maths","cls":"Target"},"AGS":{"name":"Abhishek Goswami","subject":"Physics","cls":"12th"},"AJC":{"name":"Ajeet Singh Choudhary","subject":"Maths","cls":"Target"},"AJK":{"name":"Ajin A.K","subject":"Chemistry","cls":"11th"},"AKH":{"name":"Akash Bashir","subject":"Physics","cls":"11th"},"AKJ":{"name":"Ankit Jangir","subject":"Maths","cls":"11th"},"AKR":{"name":"Ajay Kumar","subject":"Chemistry","cls":"12th"},"AKY":{"name":"Abhishek","subject":"Chemistry","cls":"11th"},"ALK":{"name":"Alok Kumar","subject":"Chemistry","cls":"11th"},"AMG":{"name":"Amit Goplani","subject":"Maths","cls":"12th"},"ANB":{"name":"Anmol Bhargava","subject":"Physics","cls":"12th"},"ANC":{"name":"Aman Chaudhary","subject":"Physics","cls":"Target"},"ANK":{"name":"Ankur Kishlay","subject":"Physics","cls":"Target"},"CDM":{"name":"Chaitanya Maharishi","subject":"Chemistry","cls":"12th"},"DJ":{"name":"Deepak Jhajharia","subject":"Chemistry","cls":"Target"},"DJP":{"name":"Dhananjay Pradhan","subject":"Maths","cls":"12th"},"DKJ":{"name":"Deepak Joshi","subject":"Physics","cls":"11th"},"DP":{"name":"Deepak Poonia","subject":"Chemistry","cls":"Target"},"DVS":{"name":"Divesh Sharma","subject":"Physics","cls":"11th"},"GRV":{"name":"Gaurav Vyas","subject":"Physics","cls":"11th"},"JPS":{"name":"Jaspreet Singh","subject":"Maths","cls":"Target"},"JTR":{"name":"Jitendra Kumar","subject":"Physics","cls":"11th"},"KD":{"name":"Kuldeep Khichar","subject":"Physics","cls":"Target"},"KGB":{"name":"Krishna Gopal","subject":"Maths","cls":"12th"},"KGT":{"name":"Kavindra Gautam","subject":"Chemistry","cls":"11th"},"KM":{"name":"Kamal Gora","subject":"Chemistry","cls":"12th"},"KNG":{"name":"Kuldeep Nagar","subject":"Chemistry","cls":"11th"},"KT":{"name":"Kamesh Tanwar","subject":"Chemistry","cls":"Target"},"LKS":{"name":"Lakhan Sharma","subject":"Chemistry","cls":"11th"},"MDS":{"name":"Mohammed Sabi","subject":"Maths","cls":"11th"},"MHR":{"name":"Hafizurrehman","subject":"Physics","cls":"11th"},"MJ":{"name":"Manish","subject":"Chemistry","cls":"Target"},"MJR":{"name":"Manoj Kumar","subject":"Chemistry","cls":"11th"},"MKS":{"name":"Mahendra Kumar Sharma","subject":"Chemistry","cls":"11th"},"MM":{"name":"Mahaveer Singh","subject":"Chemistry","cls":"12th"},"MNK":{"name":"Manish Kumawat","subject":"Physics","cls":"12th"},"MNR":{"name":"Mana Ram","subject":"Chemistry","cls":"11th"},"MP":{"name":"Mukesh Prajapat","subject":"Chemistry","cls":"12th"},"MPN":{"name":"Mohit Kumar Poonia","subject":"Maths","cls":"11th"},"MRG":{"name":"Manish Raghuvanshi","subject":"Maths","cls":"11th"},"MS":{"name":"Mahendra Singh","subject":"Maths","cls":"12th"},"MSA":{"name":"Mohd.Sadiq Ansari","subject":"Physics","cls":"Target"},"MSD":{"name":"Mahesh Kumar Dhayal","subject":"Physics","cls":"12th"},"MY":{"name":"Mukesh Yadav","subject":"Chemistry","cls":"Target"},"NK":{"name":"Narendra Kok","subject":"Chemistry","cls":"12th"},"NKB":{"name":"Nikhil Basal","subject":"Maths","cls":"Target"},"NPK":{"name":"Nirmal Pathak","subject":"Maths","cls":"11th"},"NTS":{"name":"Nishant Sharma","subject":"Chemistry","cls":"12th"},"NVK":{"name":"Naveen Kumar Kumawat","subject":"Maths","cls":"11th"},"OM":{"name":"Om Prakash","subject":"Physics","cls":"11th"},"PK":{"name":"Pawan Kumawat","subject":"Physics","cls":"12th"},"PKD":{"name":"Pawan Khod","subject":"Chemistry","cls":"12th"},"PKR":{"name":"Pankaj Yadav","subject":"Chemistry","cls":"11th"},"PKV":{"name":"Prateek Verma","subject":"Maths","cls":"11th"},"PMD":{"name":"Preetam Kumar Dotasra","subject":"Chemistry","cls":"11th"},"PMK":{"name":"Parmeshwar Lal Keelka","subject":"Chemistry","cls":"11th"},"PML":{"name":"Pramod Malviya","subject":"Maths","cls":"11th"},"PRA":{"name":"Prashant Sharma","subject":"Physics","cls":"11th"},"PRD":{"name":"Pradyumna Singh Shekhawat","subject":"Physics","cls":"11th"},"PRJ":{"name":"Pukhraj Jyani","subject":"Maths","cls":"Target"},"PRK":{"name":"Prakash Dan","subject":"Physics","cls":"Target"},"PRN":{"name":"Praveen Saini","subject":"Maths","cls":"11th"},"PRS":{"name":"Prateek Sharma","subject":"Maths","cls":"12th"},"PWS":{"name":"Pawan Saini","subject":"Maths","cls":"11th"},"RAM":{"name":"Ram Singh Choudhary","subject":"Physics","cls":"12th"},"RB":{"name":"Rajendra Burdak","subject":"Maths","cls":"12th"},"RG":{"name":"Rohit Goyal","subject":"Physics","cls":"12th"},"RJ":{"name":"Rajendra Kumar","subject":"Maths","cls":"12th"},"RKG":{"name":"Rakesh Gurjar","subject":"Chemistry","cls":"11th"},"RKM":{"name":"Rohitash Kumar","subject":"Maths","cls":"12th"},"RKT":{"name":"Rahul Kumawat","subject":"Maths","cls":"11th"},"RLP":{"name":"Rahul Poonia","subject":"Chemistry","cls":"Target"},"RLS":{"name":"Rahul Sharma","subject":"Chemistry","cls":"11th"},"RNT":{"name":"Ranjeet Singh","subject":"Physics","cls":"11th"},"RS":{"name":"Rishabh Sharma","subject":"Maths","cls":"12th"},"RSM":{"name":"Rishabh Semwal","subject":"Physics","cls":"11th"},"RVK":{"name":"Ravikumar Vishwakarma","subject":"Maths","cls":"11th"},"RVM":{"name":"Ravi Mahala","subject":"Maths","cls":"11th"},"SBM":{"name":"Shubham Sharma","subject":"Chemistry","cls":"11th"},"SDS":{"name":"Sidharth Singh","subject":"Physics","cls":"11th"},"SHB":{"name":"Shubham Budania","subject":"Physics","cls":"11th"},"SHG":{"name":"Shubham Goyal","subject":"Physics","cls":"11th"},"SID":{"name":"Siddarth Gora","subject":"Physics","cls":"12th"},"SK":{"name":"Sandeep","subject":"Physics","cls":"11th"},"SKR":{"name":"Sunil Kumar","subject":"Physics","cls":"12th"},"SMC":{"name":"Sameer Choudhari","subject":"Chemistry","cls":"11th"},"SMK":{"name":"Sumit Kulhria","subject":"Physics","cls":"Target"},"SNG":{"name":"Subhash Nagar","subject":"Maths","cls":"11th"},"SNK":{"name":"Sunil Kumar Jat","subject":"Chemistry","cls":"11th"},"SNY":{"name":"Sunil Yadav","subject":"Maths","cls":"11th"},"SOM":{"name":"Somraj Chopra","subject":"Physics","cls":"11th"},"SR":{"name":"Sushil Kumar","subject":"Maths","cls":"Target"},"SSF":{"name":"Saunu Singh Faujdar","subject":"Chemistry","cls":"Target"},"SSG":{"name":"Saurabh Singh","subject":"Maths","cls":"11th"},"SSL":{"name":"Shailendra Singh Lodhi","subject":"Chemistry","cls":"11th"},"SSN":{"name":"Shiv Kumar Sain","subject":"Maths","cls":"Target"},"TKD":{"name":"Tarun Kumar Dhabai","subject":"Chemistry","cls":"12th"},"UJ":{"name":"Utsav Jangir","subject":"Physics","cls":"12th"},"VC":{"name":"Vikash Choudhary","subject":"Maths","cls":"12th"},"VDS":{"name":"Vasudev Saini","subject":"Maths","cls":"Target"},"VJC":{"name":"Vijendra Choudhary","subject":"Physics","cls":"11th"},"VKB":{"name":"Vikash Kumar Bhamu","subject":"Chemistry","cls":"Target"},"VKJ":{"name":"Vinod Kumar","subject":"Chemistry","cls":"Target"},"VKK":{"name":"Vikash Kumar","subject":"Physics","cls":"11th"},"VKP":{"name":"Vikram Kumar Pareta","subject":"Maths","cls":"11th"},"VMS":{"name":"Vikram Singh","subject":"Chemistry","cls":"12th"},"VNG":{"name":"Vinay Singh","subject":"Maths","cls":"11th"},"VNM":{"name":"Vinayak Maheshwari","subject":"Physics","cls":"11th"},"VSK":{"name":"Vikash","subject":"Physics","cls":"11th"},"VVS":{"name":"Vivek Saini","subject":"Maths","cls":"Target"},"YKM":{"name":"Yogesh Kumar Meena","subject":"Chemistry","cls":"11th"},"SMR":{"name":"Sameer Choudhari","subject":"Chemistry","cls":"11th"},"VKS":{"name":"Vikas Singar","subject":"Physics","cls":"11th"},"ARV":{"name":"Arvind Verma","subject":"Physics","cls":"11th"},"NKG":{"name":"Nikhil Garg","subject":"Physics","cls":"11th"},"BPK":{"name":"Bhupesh Verma","subject":"Physics","cls":"11th"}},"batchRooms":{"AE1":{"floor":"3","room":"6"},"AE2":{"floor":"Old","room":"20"},"AE3":{"floor":"New","room":"3"},"AH1":{"floor":"Old","room":"15"},"AH2":{"floor":"New","room":"4"},"BE1":{"floor":"New","room":"8"},"BE2":{"floor":"New","room":"8"},"BE3":{"floor":"New","room":"3"},"BH1":{"floor":"New","room":"4"},"BH2":{"floor":"New","room":"9"},"CB1":{"floor":"4","room":"9"},"CE1":{"floor":"2","room":"5"},"CE2":{"floor":"3","room":"7"},"CE3":{"floor":"4","room":"8"},"CH1":{"floor":"4","room":"8"},"DE0":{"floor":"1","room":"8"},"DE1":{"floor":"4","room":"9"},"DE2":{"floor":"2","room":"4"},"DE3":{"floor":"2","room":"4"},"DE4":{"floor":"3","room":"7"},"DE5":{"floor":"2","room":"5"},"DH0":{"floor":"G","room":"1"},"DH1":{"floor":"1","room":"3"},"I0A":{"floor":"1","room":"8"},"I0B":{"floor":"1","room":"2"},"ICB1":{"floor":"4","room":"9"},"IEN1":{"floor":"Old","room":"19"},"IEN2":{"floor":"Old","room":"16"},"IH1":{"floor":"2","room":"7"},"IHN1":{"floor":"Old","room":"17"},"P0":{"floor":"G","room":"2"},"P1":{"floor":"1","room":"3"},"PC1":{"floor":"2","room":"5"},"PC2":{"floor":"2","room":"5"},"PC3":{"floor":"G","room":"1"},"PR1":{"floor":"3","room":"7"},"PR2":{"floor":"G","room":"1"},"PR3":{"floor":"1","room":"3"},"PR4":{"floor":"1","room":"3"},"Q0":{"floor":"G","room":"2"},"R1":{"floor":"1","room":"1"},"RB1":{"floor":"3","room":"6"},"RC1":{"floor":"2","room":"6"},"RH1":{"floor":"Old","room":"15"},"RH2":{"floor":"2","room":"5"},"RH3":{"floor":"Old","room":"14"},"RR1":{"floor":"1","room":"2"},"RR2":{"floor":"2","room":"6"},"RR3":{"floor":"2","room":"5"},"RR4":{"floor":"1","room":"2"},"RR5":{"floor":"1","room":"3"},"RR6":{"floor":"Old","room":"20"},"RR7":{"floor":"Old","room":"19"},"X1":{"floor":"G","room":"2"},"XA1":{"floor":"New","room":"10"},"XA2":{"floor":"Old","room":"17"},"XB1":{"floor":"2","room":"303"},"XB2":{"floor":"2","room":"304"},"XB3":{"floor":"2","room":"301"},"XC1":{"floor":"2","room":"302"},"XC2":{"floor":"2","room":"304"},"XC3":{"floor":"2","room":"401"},"XD1":{"floor":"New","room":"5"},"XD2":{"floor":"Old","room":"18"},"XD3":{"floor":"Old","room":"21"},"XD4":{"floor":"Old","room":"16"},"XE1":{"floor":"New","room":"11"},"XE2":{"floor":"Old","room":"22"},"XE3":{"floor":"Old","room":"23"},"XE4":{"floor":"New","room":"6"},"XF1":{"floor":"New","room":"7"},"XF2":{"floor":"Old","room":"21"},"XF3":{"floor":"Old","room":"18"},"XF4":{"floor":"New","room":"10"},"XG1":{"floor":"Old","room":"23"},"XG2":{"floor":"Old","room":"22"},"XG3":{"floor":"New","room":"6"},"XG4":{"floor":"New","room":"2"},"XH1":{"floor":"1","room":"3"},"XH2":{"floor":"1","room":"4"},"XH3":{"floor":"3","room":"7"},"XH4":{"floor":"1","room":"5"},"XH5":{"floor":"1","room":"5"},"XH6":{"floor":"1","room":"4"},"Y1":{"floor":"New","room":"9"},"YA1":{"floor":"New","room":"2"},"YA2":{"floor":"New","room":"1"},"YA3":{"floor":"New","room":"1"},"YA4":{"floor":"New","room":"5"},"YB1":{"floor":"2","room":"402"},"YB2":{"floor":"2","room":"403"},"YC1":{"floor":"1","room":"4"},"YC2":{"floor":"New","room":"11"},"YC3":{"floor":"New","room":"7"},"YC4":{"floor":"1","room":"4"},"YD1":{"floor":"2","room":"6"},"YD2":{"floor":"3","room":"8"},"YD3":{"floor":"3","room":"8"},"YH1":{"floor":"1","room":"3"},"YH2":{"floor":"1","room":"1"},"YH3":{"floor":"1","room":"6"},"ZA1":{"floor":"2","room":"6"},"ZA2":{"floor":"1","room":"1"},"ZA3":{"floor":"1","room":"1"},"ZA4":{"floor":"1","room":"2"},"ZB1":{"floor":"2","room":"404"}}};
 const E = window.MCSEngine;
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -725,18 +797,34 @@ const ICON = {
 
 /* ---------- state ---------- */
 const st = { step: 0, view: 'board', settings: null, tt: null, ttName: '', records: null, recMeta: null, recName: '', students: null,
-  plan: null, moves: [], planWarnings: [], result: null, excluded: new Set(), search: '' };
+  plan: null, moves: [], planWarnings: [], result: null, excluded: new Set(), search: '',
+  att: { slots: {}, stu: {} }, db: { weeks: {} }, recDay: '' };
+const CLASSES = ['', '11th', '12th', 'Target', 'FTP'];
+const BLDS = () => [...new Set(st.settings.knownBuildings.concat(['M3 old']))];
 
 function loadSettings() {
   const d = E.defaultSettings(MASTER);
   try {
     const s = JSON.parse(localStorage.getItem(KEY) || 'null');
-    if (s) return Object.assign(d, s, { shifts: Object.assign(d.shifts, s.shifts || {}), checks: Object.assign(d.checks, s.checks || {}),
-      counselShifts: Object.assign(d.counselShifts, s.counselShifts || {}), autoMoveShifts: Object.assign(d.autoMoveShifts, s.autoMoveShifts || {}),
-      rules: Array.isArray(s.rules) && s.rules.length ? s.rules : d.rules });
+    if (s) {
+      const m = Object.assign(d, s, { shifts: Object.assign(d.shifts, s.shifts || {}), checks: Object.assign(d.checks, s.checks || {}),
+        counselShifts: Object.assign(d.counselShifts, s.counselShifts || {}), autoMoveShifts: Object.assign(d.autoMoveShifts, s.autoMoveShifts || {}),
+        rules: Array.isArray(s.rules) && s.rules.length ? s.rules : d.rules });
+      // settings saved before FTP teachers existed: 11th and 12th now each keep to their own class, and FTP joins 11th
+      if (!/FTP/i.test(m.classGroups || '')) m.classGroups = m.classGroups === '11th | Target, 12th' ? '11th, FTP | 12th | Target' : String(m.classGroups || '').split('|').map(g => /11th/.test(g) ? g.trim() + ', FTP' : g.trim()).join(' | ');
+      return m;
+    }
   } catch (e) {}
   return d;
 }
+/* attendance (per week) and saved counselling records, kept in this browser */
+const slotKey = p => `${p.t}|${p.date || p.day}|${p.shift}`;
+const aSlot = p => st.att.slots[slotKey(p)] || {};
+const aStu = roll => st.att.stu[roll] || {};
+const dbRecs = () => Object.values(st.db.weeks || {}).flat();
+async function loadAtt() { const w = st.settings.weekStart; st.att = (w && await idb.get('att:' + w)) || { slots: {}, stu: {} }; }
+const saveAtt = () => idb.set('att:' + st.settings.weekStart, st.att);
+const saveDb = () => idb.set('db', st.db);
 function saveSettings() { try { localStorage.setItem(KEY, JSON.stringify(st.settings)); } catch (e) { toast('Settings could not be saved in this browser.'); } }
 const idb = {
   open() { return new Promise((res, rej) => { if (!window.indexedDB) return rej(new Error('no idb')); const r = indexedDB.open('mcs_planner', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); },
@@ -774,7 +862,7 @@ async function onTimetable(file) {
     for (const n of wb.SheetNames) { try { tt = E.parseTimetable(rowsOf(wb.Sheets[n])); break; } catch (e) { lastErr = e; } }
     if (!tt) throw lastErr;
     st.tt = tt; st.ttName = file.name; if (tt.weekStart) st.settings.weekStart = tt.weekStart;
-    saveSettings(); await idb.set('tt', { tt, name: file.name }); rebuildStudents(); resetSchedule(); toast('Timetable loaded');
+    saveSettings(); await idb.set('tt', { tt, name: file.name }); rebuildStudents(); await loadAtt(); resetSchedule(); toast('Timetable loaded');
     T('upload_timetable', { ok: true, teachers: (tt.teachers || []).length, size_kb: Math.round(file.size / 1024) });
   } catch (e) { T('upload_timetable', { ok: false, size_kb: Math.round(file.size / 1024) }); alert(e.message); }
   busy(false); render();
@@ -791,19 +879,55 @@ async function onStudents(file) {
   } catch (e) { T('upload_students', { ok: false, size_kb: Math.round(file.size / 1024) }); alert(e.message); }
   busy(false); render();
 }
-function rebuildStudents() { st.students = st.records ? E.buildStudents(st.records.map(r => ({ ...r, date: r.date ? new Date(r.date + 'T00:00:00Z') : null })), st.settings.weekStart) : null; }
+function rebuildStudents() { st.students = st.records ? E.buildStudents(st.records.map(r => ({ ...r, date: r.date ? new Date(r.date + 'T00:00:00Z') : null })), st.settings.weekStart, dbRecs()) : null; }
+// Reads either layout of the room list: "Batch | Building | Room No." columns, and/or the "Building | Floor | Room | Morning | Evening" grid
 async function importRoomList(file) {
-  const wb = await readWorkbook(file); let n = 0;
+  const wb = await readWorkbook(file); const done = new Set(); const s = st.settings; const rooms = s.batchRooms || (s.batchRooms = {});
+  const cs = v => v == null ? '' : String(v).replace(/\.0$/, '').trim();
   for (const name of wb.SheetNames) {
     const rows = rowsOf(wb.Sheets[name]);
     for (let r = 0; r < Math.min(rows.length, 5); r++) {
-      const h = (rows[r] || []).map(v => String(v || '').trim().toLowerCase()); const bi = h.indexOf('batch'), gi = h.findIndex(x => x.startsWith('building'));
-      if (bi < 0 || gi < 0) continue;
-      for (let i = r + 1; i < rows.length; i++) { const b = String((rows[i] || [])[bi] || '').trim(), g = String((rows[i] || [])[gi] || '').trim(); if (b && g) { st.settings.batchBuildings[b] = g; n++; } }
-      break;
+      const h = (rows[r] || []).map(v => cs(v).toLowerCase()); const bi = h.indexOf('batch'), end = bi >= 0 ? bi : h.length;
+      const fi = h.indexOf('floor'), mi = h.indexOf('morning'), ei = h.indexOf('evening');
+      const gg = h.findIndex((x, i) => i < end && x.startsWith('building')), gr = h.findIndex((x, i) => i < end && x.startsWith('room'));
+      let found = false;
+      if (fi >= 0 && gr >= 0 && (mi >= 0 || ei >= 0)) {
+        found = true; let g = '', fl = '';
+        for (let i = r + 1; i < rows.length; i++) {
+          const row = rows[i] || []; if (gg >= 0 && cs(row[gg])) g = cs(row[gg]); if (cs(row[fi])) fl = cs(row[fi]); const rm = cs(row[gr]); if (!rm) continue;
+          for (const ci of [mi, ei]) if (ci >= 0) for (const b of cs(row[ci]).split('/').map(x => x.trim()).filter(Boolean)) {
+            rooms[b] = { ...(rooms[b] || {}), floor: fl, room: rm }; if (g && !s.batchBuildings[b]) s.batchBuildings[b] = g; done.add(b);
+          }
+        }
+      }
+      if (bi >= 0) {
+        const gi = h.findIndex((x, i) => i > bi && x.startsWith('building')) >= 0 ? h.findIndex((x, i) => i > bi && x.startsWith('building')) : h.findIndex(x => x.startsWith('building'));
+        const ri = h.findIndex((x, i) => i > bi && x.startsWith('room')), f2 = h.findIndex((x, i) => i > bi && x === 'floor');
+        if (gi >= 0) {
+          found = true;
+          for (let i = r + 1; i < rows.length; i++) {
+            const row = rows[i] || [], b = cs(row[bi]), g = cs(row[gi]); if (!b) continue;
+            if (g) s.batchBuildings[b] = g;
+            if (ri >= 0 && cs(row[ri])) rooms[b] = { ...(rooms[b] || {}), room: cs(row[ri]) };
+            if (f2 >= 0 && cs(row[f2])) rooms[b] = { ...(rooms[b] || {}), floor: cs(row[f2]) };
+            done.add(b);
+          }
+        }
+      }
+      if (found) break;
     }
   }
-  changed(); toast(n ? `${n} batch buildings imported` : 'No Batch and Building columns found');
+  changed(); toast(done.size ? `${done.size} batches updated` : 'No Batch and Building columns found');
+}
+async function importRecords(file) {
+  const wb = await readWorkbook(file);
+  const p = E.parseStudents(wb.SheetNames.map(n => ({ name: n, rows: rowsOf(wb.Sheets[n]) })), Object.keys(st.settings.teachers)); let n = 0;
+  for (const r of p.records) {
+    if (!r.date || !r.by) continue; const d = r.date.toISOString().slice(0, 10), wk = E.addDays(d, -((r.date.getUTCDay() + 6) % 7));
+    const L = st.db.weeks[wk] || (st.db.weeks[wk] = []); if (L.some(x => x.roll === r.roll && x.date === d)) continue;
+    L.push({ roll: r.roll, name: r.name, batch: r.batch, date: d, time: '', by: r.by, parent: false }); n++;
+  }
+  await saveDb(); rebuildStudents(); changed(); toast(n ? `${n} records imported` : 'No new records found (needs Roll No., Batch, Date and Counsellor columns)');
 }
 async function importTeachers(file) {
   const wb = await readWorkbook(file); let n = 0;
@@ -883,13 +1007,19 @@ function viewUpload() {
       <div class="status">${rc ? `<span class="badge ok">Loaded</span> <b>${esc(st.recName)}</b><br><span class="muted">${st.students ? st.students.size.toLocaleString() : 0} students from ${rc.map(u => esc(u.sheet)).join(', ')}</span>` : '<span class="muted">Choose a file or drop it here</span>'}</div></label>
   </div>
   ${tt && tt.warnings.length ? `<div class="notice w" style="margin-top:16px"><b>Timetable notes</b><ul>${tt.warnings.map(w => `<li>${esc(w)}</li>`).join('')}</ul></div>` : ''}
+  <div class="optline" style="margin-top:16px;display:block"><b>Counselling records database</b> <span class="muted">${dbRecs().length.toLocaleString()} students counselled across ${Object.keys(st.db.weeks || {}).length} saved week${Object.keys(st.db.weeks || {}).length === 1 ? '' : 's'}. They count as history together with the student file, so the same students are not booked again until everyone has had a turn. Save a week from Weekly schedule → Dashboard.</span>
+    <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap"><button class="btn sm" type="button" id="expRec2" ${dbRecs().length ? '' : 'disabled'}>Export records (Excel)</button><label class="btn sm" style="cursor:pointer">Import records<input type="file" accept=".xlsx,.xls" id="impRec" class="hide"></label></div></div>
   ${tt || rc ? '<div style="margin-top:14px"><button class="btn ghost danger sm" type="button" id="clearData">Remove uploaded files</button></div>' : ''}`;
 }
 
 function viewWeek() {
   const s = st.settings;
-  const cab = `<div class="chips">${s.cabins.map((c, i) => `<span class="chip" style="background:var(${CABCOL[i % 6]})">Cabin ${esc(c)}<button type="button" data-delcab="${i}" aria-label="Remove cabin ${esc(c)}">×</button></span>`).join('')}
-    <span class="addrow"><input class="input sm" id="newCab" placeholder="Cabin no." style="width:110px" aria-label="New cabin number"><button class="btn sm" type="button" id="addCab">${ICON.plus}Add</button></span></div>`;
+  const cb = s.cabinBuildings || {}, bOpt = v => BLDS().map(b => `<option ${v === b ? 'selected' : ''} value="${esc(b)}">${esc(b)}</option>`).join('');
+  const cab = `<div class="tbl" style="max-width:440px"><table><thead><tr><th>Cabin</th><th>Building</th><th></th></tr></thead><tbody>
+    ${s.cabins.map((c, i) => `<tr><td><span class="chip" style="background:var(${CABCOL[i % 6]});padding:2px 12px">Cabin ${esc(c)}</span></td>
+      <td><select class="input sm" data-cabb="${esc(c)}" aria-label="Building of cabin ${esc(c)}"><option value="">—</option>${bOpt(cb[c])}</select></td>
+      <td><button class="btn ghost icon-btn danger" type="button" data-delcab="${i}" aria-label="Remove cabin ${esc(c)}">${ICON.del}</button></td></tr>`).join('')}</tbody></table></div>
+    <div class="addrow" style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><select class="input sm" id="newCabB" aria-label="Building of the new cabin">${bOpt(cb[s.cabins[s.cabins.length - 1]] || 'M1')}</select><input class="input sm" id="newCab" placeholder="Cabin no." style="width:110px" aria-label="New cabin number"><button class="btn sm" type="button" id="addCab">${ICON.plus}Add cabin</button></div>`;
   const week = `<label class="f" for="weekStart">Monday of the week</label><input class="input" type="date" id="weekStart" value="${esc(s.weekStart)}">`;
   const per = `<div class="tbl"><table><thead><tr><th>Period</th><th>Use for counselling</th><th>Auto-move here</th><th>Start</th><th>End</th><th class="num">Per student</th></tr></thead><tbody>
     ${E.SLOTS.map(sh => { const on = !!s.counselShifts[sh], len = (toS(s.shifts[sh][1]) - toS(s.shifts[sh][0])) / s.baseStudents;
@@ -898,7 +1028,7 @@ function viewWeek() {
       <td><input class="input sm" type="time" data-shift="${sh}" data-i="0" value="${s.shifts[sh][0]}" aria-label="${sh} start"></td><td><input class="input sm" type="time" data-shift="${sh}" data-i="1" value="${s.shifts[sh][1]}" aria-label="${sh} end"></td>
       <td class="num">${len > 0 ? `${Math.floor(len / 60)} min ${Math.round(len % 60)} s` : '—'}</td></tr>`; }).join('')}</tbody></table></div>
     <div style="margin-top:16px"><label class="f" for="base">Students per slot, before building reductions</label><input class="input" type="number" min="1" max="30" id="base" value="${s.baseStudents}" style="width:120px"></div>`;
-  return `<div class="card">${section('Counselling cabins', ['One teacher per cabin per slot.', 'When a period has more teachers than cabins, extra slots move to a free cabin where the teacher has no class.'], cab, 'sec-cabins')}
+  return `<div class="card">${section('Counselling cabins', ['One teacher per cabin per slot. Choose the building each cabin is in.', `When a cabin is in ${esc(s.pcVenueBuilding)}, teachers with a class at PC campus just before or after counselling get a PC cabin, with students whose class is at PC. Everyone else uses the other cabins.`, 'When a period has more teachers than cabins, extra slots move to a free cabin where the teacher has no class.'], cab, 'sec-cabins')}
     ${section('Week', 'Read from the timetable title when possible. Counselling before this date counts as history.', week)}
     ${section('Periods', ['Choose which periods can hold counselling. M1 and E1 are off by default.', '“Use for counselling” schedules timetable counselling cells in that period and lets you add slots there. “Auto-move here” lets the planner move overflow slots into it.', s.counselShifts.M1 || s.counselShifts.E1 ? '<span class="badge warn">Check the M1 and E1 times match your timetable.</span>' : ''], per)}</div>`;
 }
@@ -926,8 +1056,12 @@ function viewRules() {
   const cons = `<div class="optline">${toggle('optOpp', s.oppositeShiftOnly !== false, 'Counsel students only in the opposite shift')}<div><b>Only in the opposite shift</b><span class="muted">Morning batches are counselled in evening periods and evening batches in morning periods. Turn off to also use free periods inside a batch’s own shift.</span></div></div>
     <div class="optline">${toggle('optRepeat', s.noRepeatTeacher, 'Always a different teacher')}<div><b>Always a different teacher</b><span class="muted">Skip students this teacher has counselled before.</span></div></div>
     <div class="optline">${toggle('optMove', s.moveOverflow, 'Move slots when cabins are full')}<div><b>Move slots when cabins are full</b><span class="muted">Same day first, then the nearest day, only where the teacher has no class.</span></div></div>
+    <div class="optline">${toggle('optSenior', s.protectSenior !== false, 'Never move senior faculty')}<div><b>Never move senior faculty</b><span class="muted">When cabins are full, only other teachers are moved. Senior faculty are teachers of these classes:</span><input class="input sm" id="senior" value="${esc(s.seniorClasses || '')}" style="width:160px;margin-top:6px" aria-label="Senior faculty classes"></div></div>
+    <div class="optline">${toggle('optStrict', s.strictClass !== false, 'Students only with a teacher of their class')}<div><b>Students only with a teacher of their class</b><span class="muted">Uses “Teacher classes that share students” below. By default 11th students meet 11th and FTP teachers, 12th students meet 12th teachers and Target students meet Target teachers. Applies to every rule.</span></div></div>
+    <div class="optline">${toggle('optRound', s.onceRound !== false, 'Every student once before anyone again')}<div><b>Every student once before anyone again</b><span class="muted">A student is booked again only when every student in this week’s batches has been counselled as many times. Counts the student file and the saved weekly records.</span></div></div>
+    <div class="optline">${toggle('optTopUp', !!s.roundTopUp, 'Fill seats the round rule leaves empty', s.onceRound !== false ? '' : 'disabled')}<div><b>Fill seats the round rule leaves empty</b><span class="muted">Off: a seat stays empty rather than repeat a student. On: it goes to the student counselled longest ago.</span></div></div>
     <div class="optline"><input class="input sm" type="number" min="0" max="365" id="gap" value="${s.minGapDays || 0}" style="width:76px" aria-label="Minimum days between counselling"><div><b>Days before a student can be counselled again</b><span class="muted">0 means no limit. Students counselled more recently are skipped.</span></div></div>
-    <div class="optline" style="display:block"><label class="f" for="cg">Teacher classes that share students</label><input class="input" id="cg" value="${esc(s.classGroups)}" style="width:min(380px,100%)"><div class="muted" style="font-size:13.5px;margin-top:4px">Separate groups with |. Used by “students of the same class group”.</div></div>
+    <div class="optline" style="display:block"><label class="f" for="cg">Teacher classes that share students</label><input class="input" id="cg" value="${esc(s.classGroups)}" style="width:min(380px,100%)"><div class="muted" style="font-size:13.5px;margin-top:4px">Separate groups with |. Used by “students of the same class group” and “Students only with a teacher of their class”. FTP is for new teachers, who counsel 11th students.</div></div>
     <div class="optline" style="display:block"><label class="f" for="kw">Word that marks a counselling cell in the timetable</label><input class="input" id="kw" value="${esc(s.keyword)}" style="width:220px"></div>`;
   const red = `<label class="f">Buildings that reduce the count</label>
     <div class="chips" style="margin-bottom:18px">${s.reduceBuildings.map((b, i) => `<span class="chip" style="background:var(--surface2);border-color:var(--line)">${esc(b)}<button type="button" data-delred="${i}" aria-label="Remove ${esc(b)}">×</button></span>`).join('')}
@@ -941,21 +1075,22 @@ function viewRules() {
       <button class="btn sm" type="button" id="addT">${ICON.plus}Add teacher</button><label class="btn sm" style="cursor:pointer">Import from Excel<input type="file" accept=".xlsx,.xls" id="impT" class="hide"></label></div>
     <div class="tbl scrollbox"><table id="tTable"><thead><tr><th>Code</th><th>Full name</th><th>Subject</th><th>Class</th><th></th></tr></thead><tbody>
       ${tRows.map(([c, t]) => `<tr data-t="${esc(c)}"><td><b>${esc(c)}</b></td><td><input class="input sm" data-tf="name" value="${esc(t.name)}" aria-label="Name of ${esc(c)}"></td><td><input class="input sm" data-tf="subject" value="${esc(t.subject)}" style="width:110px" aria-label="Subject of ${esc(c)}"></td>
-        <td><select class="input sm" data-tf="cls" aria-label="Class of ${esc(c)}">${['', '11th', '12th', 'Target'].concat(t.cls && !['11th', '12th', 'Target'].includes(t.cls) ? [t.cls] : []).map(o => `<option ${t.cls === o ? 'selected' : ''} value="${esc(o)}">${o || '—'}</option>`).join('')}</select></td>
+        <td><select class="input sm" data-tf="cls" aria-label="Class of ${esc(c)}">${CLASSES.concat(t.cls && !CLASSES.includes(t.cls) ? [t.cls] : []).map(o => `<option ${t.cls === o ? 'selected' : ''} value="${esc(o)}">${o || '—'}</option>`).join('')}</select></td>
         <td><button class="btn ghost icon-btn danger" type="button" data-delt="${esc(c)}" aria-label="Remove ${esc(c)}">${ICON.del}</button></td></tr>`).join('')}</tbody></table></div>`;
   const bld = `${missingB.length ? `<div class="notice w">No building for <b>${missingB.slice(0, 50).map(esc).join(', ')}${missingB.length > 50 ? '…' : ''}</b>. Classes in these batches never reduce the count.</div>` : ''}
     <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"><input class="input sm" id="bFilter" placeholder="Find a batch" style="width:200px" aria-label="Find a batch">
       <button class="btn sm" type="button" id="addB">${ICON.plus}Add batch</button><label class="btn sm" style="cursor:pointer">Import room list<input type="file" accept=".xlsx,.xls" id="impB" class="hide"></label></div>
-    <div class="tbl scrollbox" style="max-width:520px"><table id="bTable"><thead><tr><th>Batch</th><th>Building</th><th></th></tr></thead><tbody>
-      ${bRows.map(([b, g]) => `<tr data-b="${esc(b)}"><td><b>${esc(b)}</b></td><td><input class="input sm" data-bf value="${esc(g)}" list="bldList" aria-label="Building of ${esc(b)}"></td><td><button class="btn ghost icon-btn danger" type="button" data-delb="${esc(b)}" aria-label="Remove ${esc(b)}">${ICON.del}</button></td></tr>`).join('')}</tbody></table></div>
+    <div class="tbl scrollbox" style="max-width:640px"><table id="bTable"><thead><tr><th>Batch</th><th>Building</th><th>Floor</th><th>Room</th><th></th></tr></thead><tbody>
+      ${bRows.map(([b, g]) => { const rm = (s.batchRooms || {})[b] || {}; return `<tr data-b="${esc(b)}"><td><b>${esc(b)}</b></td><td><input class="input sm" data-bf value="${esc(g)}" list="bldList" aria-label="Building of ${esc(b)}"></td>
+        <td><input class="input sm" data-brf="floor" value="${esc(rm.floor || '')}" style="width:70px" aria-label="Floor of ${esc(b)}"></td><td><input class="input sm" data-brf="room" value="${esc(rm.room || '')}" style="width:70px" aria-label="Room of ${esc(b)}"></td><td><button class="btn ghost icon-btn danger" type="button" data-delb="${esc(b)}" aria-label="Remove ${esc(b)}">${ICON.del}</button></td></tr>`; }).join('')}</tbody></table></div>
     <datalist id="bldList">${s.knownBuildings.concat(['M3 old']).map(b => `<option value="${esc(b)}">`).join('')}</datalist>`;
   const backup = `<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" type="button" id="expSet">Export settings</button>
     <label class="btn" style="cursor:pointer">Import settings<input type="file" accept=".json" id="impSet" class="hide"></label><button class="btn danger" type="button" id="resetSet">Reset everything to defaults</button></div>`;
   return `<div class="card">${section('Matching rules', ['Rules run from top to bottom. Each one fills the seats that are still empty in the matching teachers’ slots.', 'A student is only placed when they have no class then (by default, only in the shift opposite to their classes), and is booked once a week.'], rules, 'rules')}
     ${section('Matching limits', 'These apply to every rule.', cons, 'sec-limits')}
     ${section('Student count by building', ['Each slot starts with the students-per-slot number.', 'It loses 1 for each neighbouring class held in one of these buildings, because the teacher needs time to walk over.'], red, 'sec-building')}
-    ${section(`Teachers <span class="badge">${tRows.length}</span>`, 'Class decides which students a teacher can get under “same class group” and “teacher of class” rules.', teach, 'sec-teachers')}
-    ${section(`Batch buildings <span class="badge">${bRows.length}</span>`, 'Used by the building rule. Doubt classes take the building from the first word, such as “M3 P Dbt 2”.', bld, 'sec-batches')}
+    ${section(`Teachers <span class="badge">${tRows.length}</span>`, ['Class decides which students a teacher can get under “same class group” and “teacher of class” rules.', 'FTP = new teachers (Faculty Training Program), who counsel 11th students. A teacher with no class here and no classes in the timetable is treated as FTP.'], teach, 'sec-teachers')}
+    ${section(`Batch buildings <span class="badge">${bRows.length}</span>`, ['Used by the building rule, the PC campus rule and the announcement sheet. Doubt classes take the building from the first word, such as “M3 P Dbt 2”.', 'Import room list reads Batch, Building and Room No. columns, and the Building, Floor, Room, Morning, Evening layout.'], bld, 'sec-batches')}
     ${section('Backup', 'Copy all settings to another computer, or start over.', backup, 'sec-backup')}</div>`;
 }
 
@@ -979,14 +1114,94 @@ function viewSchedule() {
       <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap"><button class="btn" type="button" data-go="0">Go to set up</button><button class="btn primary" type="button" id="calc4" ${ready() ? '' : 'disabled'}>Calculate schedule</button></div></div>`;
   const r = st.result, cap = st.plan.reduce((a, p) => a + p.k, 0);
   const notes = [...(r.invalid || []).map(x => ['e', x]), ...st.planWarnings.map(x => ['w', x]), ...r.warnings.map(x => ['w', x])];
-  const views = [['board', 'Cabin board'], ['sessions', 'Teacher sessions'], ['students', 'Students'], ['workload', 'Workload'], ['notes', `Moves and notes · ${st.moves.length + notes.length}`]];
+  const views = [['board', 'Cabin board'], ['sessions', 'Teacher sessions'], ['students', 'Students'], ['reception', 'Reception'], ['announce', 'Announcements'], ['dash', 'Dashboard'], ['workload', 'Workload'], ['notes', `Moves and notes · ${st.moves.length + notes.length}`]];
   return head('Weekly schedule', 'Select a slot on the board to move it, change its students or remove it. The student list updates straight away.',
-    `<button class="btn" type="button" id="addSlot">${ICON.plus}Add slot</button><button class="btn primary" type="button" id="dl">${ICON.dl}Download Excel</button>`)
+    `<button class="btn" type="button" id="addSlot">${ICON.plus}Add slot</button><button class="btn" type="button" id="dlRep">${ICON.dl}Download report</button><button class="btn primary" type="button" id="dl">${ICON.dl}Download Excel</button>`)
   + `<div class="kpis"><div class="kpi"><b>${st.plan.length}</b><span>Counselling slots</span></div><div class="kpi"><b>${r.rows.length}</b><span>Students booked of ${cap} seats</span></div>
      <div class="kpi"><b>${st.moves.length}</b><span>Slots moved to a free cabin</span></div><div class="kpi"><b>${r.repeatSkips}</b><span>Repeat teachers avoided</span></div></div>
   ${notes.some(n => n[0] === 'e') ? `<div class="notice e"><b>Fix before sending</b><ul>${notes.filter(n => n[0] === 'e').map(n => `<li>${esc(n[1])}</li>`).join('')}</ul></div>` : ''}
   <div class="tabs" role="tablist">${views.map(([k, l]) => `<button type="button" role="tab" aria-selected="${st.view === k}" class="${st.view === k ? 'on' : ''}" data-view="${k}">${l}</button>`).join('')}</div>
-  ${({ board: vBoard, sessions: vSessions, students: vStudents, workload: vWorkload, notes: () => vNotes(notes) })[st.view]()}`;
+  ${({ board: vBoard, sessions: vSessions, students: vStudents, reception: vReception, announce: vAnnounce, dash: vDash, workload: vWorkload, notes: () => vNotes(notes) })[st.view]()}`;
+}
+const weekText = () => `${fmtDate(st.settings.weekStart)} – ${fmtDate(E.addDays(st.settings.weekStart, 5))}`;
+// counts for the reception, dashboard and report: per day, per slot and for the week
+function weekStats() {
+  const z = () => ({ slots: 0, tin: 0, late: 0, tabs: 0, booked: 0, P: 0, A: 0, U: 0, par: 0 });
+  const day = Object.fromEntries(E.DAYS.map(d => [d, z()])), slot = {}, tot = z();
+  for (const p of st.plan) {
+    const a = aSlot(p); slot[p.id] = z(); slot[p.id].slots = 1;
+    for (const o of [day[p.day], tot]) { o.slots++; if (a.status === 'Present' || a.status === 'Late') o.tin++; if (a.status === 'Late') o.late++; if (a.status === 'Absent') o.tabs++; }
+  }
+  for (const r of st.result.rows) {
+    const a = aStu(r.s.roll);
+    for (const o of [day[r.p.day], tot, slot[r.pid]]) { if (!o) continue; o.booked++; if (a.att === 'Present') o.P++; else if (a.att === 'Absent') o.A++; else o.U++; if (a.parent) o.par++; }
+  }
+  return { day, slot, tot };
+}
+const nat = (a, b) => String(a).localeCompare(String(b), undefined, { numeric: true });
+function annRows() {
+  const s = st.settings, rm = s.batchRooms || {};
+  return st.result.rows.map(r => ({ r, bld: s.batchBuildings[r.s.batch] || '', fl: (rm[r.s.batch] || {}).floor || '', room: (rm[r.s.batch] || {}).room || '' }))
+    .sort((a, b) => nat(a.bld || '~', b.bld || '~') || nat(a.fl, b.fl) || nat(a.room || '~', b.room || '~') || nat(a.r.s.batch, b.r.s.batch) || E.DAYS.indexOf(a.r.p.day) - E.DAYS.indexOf(b.r.p.day) || (a.r.time < b.r.time ? -1 : 1));
+}
+const selBox = (attr, val, opts, label) => `<select class="input sm" ${attr} aria-label="${esc(label)}">${opts.map(o => `<option ${o === (val || '') ? 'selected' : ''} value="${esc(o)}">${o || '—'}</option>`).join('')}</select>`;
+function vReception() {
+  const days = E.DAYS.filter(d => st.plan.some(p => p.day === d));
+  if (!days.includes(st.recDay)) { const today = new Date().toISOString().slice(0, 10); st.recDay = days.find(d => dayDate(d) === today) || days[0] || 'Monday'; }
+  const byP = {}; st.result.rows.forEach(r => (byP[r.pid] = byP[r.pid] || []).push(r));
+  const slots = st.plan.filter(p => p.day === st.recDay);
+  return `<p class="muted" style="margin-top:0">For the reception desk. Enter each teacher’s in and out time, and mark each student present or absent and whether a parent came. It saves in this browser as you go. A teacher who comes more than 10 minutes after the slot starts is marked late.</p>
+  <div class="tabs" style="margin-bottom:14px">${days.map(d => `<button type="button" class="${d === st.recDay ? 'on' : ''}" data-recday="${d}">${d.slice(0, 3)} ${fmtShort(dayDate(d))}</button>`).join('')}</div>
+  ${slots.map(p => {
+    const a = aSlot(p), k = esc(slotKey(p)), rows = (byP[p.id] || []).sort((x, y) => x.time < y.time ? -1 : 1);
+    return `<div class="card" style="padding:16px 18px;margin-bottom:14px"><div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;justify-content:space-between">
+      <div><b>${esc(p.shift)} · Cabin ${esc(p.cabin || '—')}${p.building ? ' · ' + esc(p.building) : ''}</b><div class="muted">${esc(p.t)} ${esc(tName(p.t))} · ${E.hm(p.start)}–${E.hm(p.end)} · ${rows.length} students</div></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+        <div><label class="f">In</label><input class="input sm" type="time" data-as="${k}" data-f="in" value="${esc(a.in || '')}" aria-label="In time of ${esc(p.t)}"></div>
+        <div><label class="f">Out</label><input class="input sm" type="time" data-as="${k}" data-f="out" value="${esc(a.out || '')}" aria-label="Out time of ${esc(p.t)}"></div>
+        <div><label class="f">Teacher</label>${selBox(`data-as="${k}" data-f="status"`, a.status, ['', 'Present', 'Late', 'Absent'], 'Teacher status')}</div>
+        <div><label class="f">Called</label>${selBox(`data-as="${k}" data-f="call"`, a.call, ['', 'Yes', 'No'], 'Teacher called')}</div>
+        <div><label class="f">Remark</label><input class="input sm" data-as="${k}" data-f="remark" value="${esc(a.remark || '')}" style="width:170px" aria-label="Remark for ${esc(p.t)}"></div></div></div>
+      ${rows.length ? `<div class="tbl" style="margin-top:12px"><table><thead><tr><th>Time</th><th>Student</th><th>Roll no.</th><th>Batch</th><th>Attendance</th><th>Parent came</th><th>Absent reason</th></tr></thead><tbody>
+      ${rows.map(r => { const x = aStu(r.s.roll), rl = esc(r.s.roll); return `<tr><td>${r.time}</td><td><b>${esc(r.s.name)}</b></td><td>${rl}</td><td>${esc(r.s.batch)}</td>
+        <td>${selBox(`data-au="${rl}" data-f="att"`, x.att, ['', 'Present', 'Absent'], 'Attendance of ' + r.s.name)}</td>
+        <td>${toggle('par_' + rl, x.parent, 'Parent came with ' + r.s.name, `data-au="${rl}" data-f="parent"`)}</td>
+        <td><input class="input sm" data-au="${rl}" data-f="reason" value="${esc(x.reason || '')}" style="width:180px" aria-label="Absent reason for ${esc(r.s.name)}"></td></tr>`; }).join('')}</tbody></table></div>` : ''}</div>`;
+  }).join('') || '<div class="notice i">No counselling slots on this day.</div>'}`;
+}
+function vAnnounce() {
+  const rows = annRows(), groups = []; let g = null;
+  for (const x of rows) { const key = [x.bld, x.fl, x.room, x.r.s.batch].join('|'); if (!g || g.key !== key) groups.push(g = { key, bld: x.bld, fl: x.fl, room: x.room, batch: x.r.s.batch, list: [] }); g.list.push(x.r); }
+  const missing = [...new Set(rows.filter(x => !x.room).map(x => x.r.s.batch))];
+  return `<p class="muted" style="margin-top:0">One row per class room, in building, floor and room order, so the announcement can be made class by class. ${groups.length} classes, ${rows.length} students. The Excel download has the same list in the “Announcements” sheet.</p>
+  ${missing.length ? `<div class="notice w">No room number for <b>${missing.map(esc).join(', ')}</b>. Add it under Set up → Batch buildings.</div>` : ''}
+  <div class="tbl"><table><thead><tr><th>Building</th><th>Floor</th><th>Room</th><th>Batch</th><th>Students with counselling this week</th></tr></thead><tbody>
+  ${groups.map(g => `<tr><td><b>${esc(g.bld || '—')}</b></td><td>${esc(g.fl || '—')}</td><td>${esc(g.room || '—')}</td><td><b>${esc(g.batch)}</b></td>
+    <td style="white-space:normal;min-width:420px">${g.list.map(r => `${esc(r.s.name)} <span class="muted">(${esc(r.s.roll)}) · ${r.p.day.slice(0, 3)} ${fmtShort(r.p.date)} ${r.time} · ${esc(r.p.venue)}, cabin ${esc(r.p.cabin)} · ${esc(tName(r.p.t))}</span>`).join('<br>')}</td></tr>`).join('')}</tbody></table></div>`;
+}
+function vDash() {
+  const w = weekStats(), t = w.tot, cov = st.result.coverage || { active: 0, done: 0, byClass: {}, round: 1, roundDone: 0, reachable: 0 };
+  const pct = (a, b) => b ? Math.round(a * 100 / b) + '%' : '—', first = st.result.rows.filter(r => !r.s.times).length;
+  const saved = Object.entries(st.db.weeks || {}).sort((a, b) => a[0] < b[0] ? 1 : -1);
+  const bar = (a, b) => `<div style="height:8px;border-radius:4px;background:var(--surface2);display:inline-block;width:140px;vertical-align:middle"><div style="height:8px;border-radius:4px;background:var(--accent);width:${b ? Math.round(a * 100 / b) : 0}%"></div></div>`;
+  const sm = v => `<small style="font-size:18px;color:var(--muted)"> / ${v}</small>`;
+  const dayRow = (label, x, b) => `<tr><td>${label}</td>${[x.slots, x.tin, x.late, x.tabs, x.booked, x.P, x.A, x.U, x.par].map(v => `<td class="num">${b ? `<b>${v}</b>` : v}</td>`).join('')}</tr>`;
+  return `<h2 class="gh" style="margin-top:0">This week</h2>
+  <div class="kpis"><div class="kpi"><b>${t.tin}${sm(t.slots)}</b><span>Teachers came · ${t.late} late, ${t.tabs} absent</span></div>
+    <div class="kpi"><b>${t.P}${sm(t.booked)}</b><span>Students present · ${t.A} absent, ${t.U} not marked</span></div>
+    <div class="kpi"><b>${t.par}</b><span>Parents came · ${pct(t.par, t.P)} of present students</span></div>
+    <div class="kpi"><b>${first}</b><span>Booked students never counselled before</span></div></div>
+  <div class="tbl" style="margin-bottom:24px"><table><thead><tr><th>Day</th><th class="num">Slots</th><th class="num">Teachers came</th><th class="num">Late</th><th class="num">Teacher absent</th><th class="num">Students booked</th><th class="num">Present</th><th class="num">Absent</th><th class="num">Not marked</th><th class="num">Parents came</th></tr></thead><tbody>
+    ${E.DAYS.filter(d => w.day[d].slots).map(d => dayRow(`<b>${d}</b> <span class="muted">${fmtShort(dayDate(d))}</span>`, w.day[d])).join('')}${dayRow('<b>Week</b>', t, true)}</tbody></table></div>
+  <h2 class="gh">All students so far</h2>
+  <p class="muted">Students in this week’s batches, from the student file and the saved weekly records, before this week. Round ${cov.round}: ${cov.roundDone.toLocaleString()} of ${cov.reachable.toLocaleString()} students done. ${st.settings.onceRound !== false ? 'Nobody is booked again until the round is complete.' : 'The round rule is off.'}</p>
+  <div class="tbl" style="margin-bottom:24px"><table><thead><tr><th>Class</th><th class="num">Students</th><th class="num">Counselled at least once</th><th class="num">Never counselled</th><th>Coverage</th></tr></thead><tbody>
+    ${Object.entries(cov.byClass).sort((a, b) => nat(a[0], b[0])).map(([c, x]) => `<tr><td><b>${esc(c)}</b></td><td class="num">${x.active}</td><td class="num">${x.done}</td><td class="num">${x.active - x.done}</td><td>${bar(x.done, x.active)} <span class="muted">${pct(x.done, x.active)}</span></td></tr>`).join('')}
+    <tr><td><b>All</b></td><td class="num"><b>${cov.active}</b></td><td class="num"><b>${cov.done}</b></td><td class="num"><b>${cov.active - cov.done}</b></td><td>${bar(cov.done, cov.active)} <span class="muted">${pct(cov.done, cov.active)}</span></td></tr></tbody></table></div>
+  <h2 class="gh">Saved weekly records</h2>
+  <p class="muted">When the week is over, save it to the records. Students marked present, or not marked, count as counselled, so next week books the students still waiting. Absent students stay in the queue. Records are kept in this browser; export them to keep a copy in Drive.</p>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"><button class="btn primary" type="button" id="saveWeek">Save this week to records</button><button class="btn" type="button" id="expRec" ${saved.length ? '' : 'disabled'}>Export records (Excel)</button></div>
+  ${saved.length ? `<div class="tbl" style="max-width:560px"><table><thead><tr><th>Week of</th><th class="num">Students counselled</th><th class="num">Parent came</th></tr></thead><tbody>${saved.map(([wk, l]) => `<tr><td>${fmtDate(wk)}${wk === st.settings.weekStart ? ' <span class="badge">this week</span>' : ''}</td><td class="num">${l.length}</td><td class="num">${l.filter(x => x.parent).length}</td></tr>`).join('')}</tbody></table></div>` : '<div class="notice i">No weeks saved yet.</div>'}`;
 }
 const cabColor = c => `var(${CABCOL[Math.max(0, st.settings.cabins.indexOf(c)) % 6]})`;
 const firstName = t => tName(t).split(' ')[0];
@@ -1006,7 +1221,7 @@ function vBoard() {
         if (!p) { h += `<span class="tile free">Cabin ${esc(c)} free</span>`; continue; }
         h += `<button type="button" class="tile ${p.manual ? 'manual' : p.moved ? 'moved' : ''}" style="background:${cabColor(c)}" data-pid="${p.id}" aria-label="${esc(p.t)}, cabin ${esc(c)}, ${d} ${sh}, ${cnt[p.id] || 0} students. Edit">
           <span class="cab">${esc(c)}</span><span class="who">${esc(p.t)} <small>${esc(firstName(p.t))}</small></span><span class="n">${cnt[p.id] || 0}</span>
-          <span class="meta">${p.moved ? `<b>From ${p.origDay.slice(0, 3)} ${p.origShift}</b> · ` : ''}${E.hm(p.start)}–${E.hm(p.end)}</span></button>`;
+          <span class="meta">${p.moved ? `<b>From ${p.origDay.slice(0, 3)} ${p.origShift}</b> · ` : ''}${E.hm(p.start)}–${E.hm(p.end)}${p.building ? ' · ' + esc(p.building) : ''}</span></button>`;
       }
       here.filter(p => !p.cabin || !s.cabins.includes(p.cabin)).forEach(p => { h += `<button type="button" class="tile" style="background:var(--danger-soft)" data-pid="${p.id}"><span class="cab">!</span><span class="who">${esc(p.t)}</span><span class="n">${cnt[p.id] || 0}</span><span class="meta">No free cabin</span></button>`; });
       h += `</div>`;
@@ -1055,7 +1270,7 @@ function openEdit(pid) {
     <div class="bd">${isNew ? `<div><label class="f" for="eT">Teacher</label><select class="input" id="eT" style="width:100%">${teachers.map(t => `<option value="${esc(t)}">${esc(t)} · ${esc(tName(t))}</option>`).join('')}</select></div>` : ''}
       <div class="grid3"><div><label class="f" for="eD">Day</label><select class="input" id="eD">${E.DAYS.map(d => `<option ${p && p.day === d ? 'selected' : ''}>${d}</option>`).join('')}</select></div>
         <div><label class="f" for="eS">Period</label><select class="input" id="eS">${E.SLOTS.filter(x => SH.includes(x)).map(x => `<option ${p && p.shift === x ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
-        <div><label class="f" for="eC">Cabin</label><select class="input" id="eC"><option value="">Any free</option>${s.cabins.map(c => `<option ${p && p.manual && p.cabin === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div></div>
+        <div><label class="f" for="eC">Cabin</label><select class="input" id="eC"><option value="">Any free</option>${s.cabins.map(c => `<option value="${esc(c)}" ${p && p.manual && p.cabin === c ? 'selected' : ''}>${esc(c)}${(s.cabinBuildings || {})[c] ? ' · ' + esc(s.cabinBuildings[c]) : ''}</option>`).join('')}</select></div></div>
       <div><label class="f" for="eK">Students</label><input class="input" type="number" min="0" max="30" id="eK" placeholder="Automatic (building rule)" value="${p && p.manualK != null ? p.manualK : ''}" style="width:100%"></div>
       <div class="check" id="eMsg" aria-live="polite"></div>
       ${!isNew && st.result ? `<div><label class="f">Booked students</label><div class="muted" style="font-size:14px">${st.result.rows.filter(r => r.pid === p.id).map(r => `${r.time} ${esc(r.s.name)}`).join('<br>') || 'None'}</div></div>` : ''}</div>
@@ -1090,10 +1305,11 @@ function bind() {
   });
   on('clearData', 'click', async () => { if (!confirm('Remove the uploaded timetable and student data from this browser?')) return; await idb.del('tt'); await idb.del('rec'); Object.assign(st, { tt: null, records: null, recMeta: null, students: null }); resetSchedule(); render(); });
   // week & cabins
-  on('addCab', 'click', () => { const v = $('newCab').value.trim(); if (!v) return; if (st.settings.cabins.includes(v)) return toast('That cabin is already listed'); st.settings.cabins.push(v); changed(); });
+  on('addCab', 'click', () => { const v = $('newCab').value.trim(); if (!v) return; if (st.settings.cabins.includes(v)) return toast('That cabin is already listed'); st.settings.cabins.push(v); (st.settings.cabinBuildings = st.settings.cabinBuildings || {})[v] = $('newCabB').value; changed(); if (st.plan) toast('Recalculate to use the new cabin'); });
+  all('[data-cabb]', el => el.onchange = () => { (st.settings.cabinBuildings = st.settings.cabinBuildings || {})[el.dataset.cabb] = el.value; changed(false); if (st.plan) toast('Recalculate to apply the cabin buildings'); });
   on('newCab', 'keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('addCab').click(); } });
-  all('[data-delcab]', b => b.onclick = () => { st.settings.cabins.splice(+b.dataset.delcab, 1); changed(); });
-  on('weekStart', 'change', e => { st.settings.weekStart = e.target.value; rebuildStudents(); changed(); });
+  all('[data-delcab]', b => b.onclick = () => { const c = st.settings.cabins.splice(+b.dataset.delcab, 1)[0]; if (st.settings.cabinBuildings) delete st.settings.cabinBuildings[c]; changed(); });
+  on('weekStart', 'change', async e => { st.settings.weekStart = e.target.value; rebuildStudents(); await loadAtt(); changed(); });
   all('[data-shift]', i => i.onchange = () => { st.settings.shifts[i.dataset.shift][+i.dataset.i] = i.value; changed(); });
   all('[data-use]', i => i.onchange = () => { st.settings.counselShifts[i.dataset.use] = i.checked; if (i.checked && st.settings.autoMoveShifts[i.dataset.use] == null) st.settings.autoMoveShifts[i.dataset.use] = true; changed(); if (st.plan) toast('Recalculate to bring timetable counselling cells into this period'); });
   all('[data-mv]', i => i.onchange = () => { st.settings.autoMoveShifts[i.dataset.mv] = i.checked; changed(); if (st.plan) toast('Recalculate to apply automatic moves'); });
@@ -1110,6 +1326,11 @@ function bind() {
   on('optOpp', 'change', e => { st.settings.oppositeShiftOnly = e.target.checked; changed(false); });
   on('optRepeat', 'change', e => { st.settings.noRepeatTeacher = e.target.checked; changed(false); });
   on('optMove', 'change', e => { st.settings.moveOverflow = e.target.checked; changed(false); if (st.plan) toast('Recalculate to apply'); });
+  on('optSenior', 'change', e => { st.settings.protectSenior = e.target.checked; changed(false); if (st.plan) toast('Recalculate to apply'); });
+  on('senior', 'change', e => { st.settings.seniorClasses = e.target.value; changed(false); if (st.plan) toast('Recalculate to apply'); });
+  on('optStrict', 'change', e => { st.settings.strictClass = e.target.checked; changed(false); });
+  on('optRound', 'change', e => { st.settings.onceRound = e.target.checked; changed(); });
+  on('optTopUp', 'change', e => { st.settings.roundTopUp = e.target.checked; changed(false); });
   on('gap', 'change', e => { st.settings.minGapDays = Math.max(0, +e.target.value || 0); changed(false); });
   on('cg', 'change', e => { st.settings.classGroups = e.target.value; changed(false); });
   on('kw', 'change', e => { st.settings.keyword = e.target.value.trim() || 'Counselling'; changed(); });
@@ -1121,6 +1342,7 @@ function bind() {
   all('[data-delt]', b => b.onclick = () => { delete st.settings.teachers[b.dataset.delt]; changed(); });
   on('addT', 'click', () => { const c = (prompt('Teacher short code, as in the timetable') || '').trim(); if (!c) return; st.settings.teachers[c] = st.settings.teachers[c] || { name: '', subject: '', cls: '' }; changed(); });
   all('#bTable [data-bf]', i => i.onchange = () => { st.settings.batchBuildings[i.closest('tr').dataset.b] = i.value.trim(); changed(false); });
+  all('#bTable [data-brf]', i => i.onchange = () => { const b = i.closest('tr').dataset.b, rm = st.settings.batchRooms || (st.settings.batchRooms = {}); rm[b] = { ...(rm[b] || {}), [i.dataset.brf]: i.value.trim() }; changed(false); });
   all('[data-delb]', b => b.onclick = () => { delete st.settings.batchBuildings[b.dataset.delb]; changed(); });
   on('addB', 'click', () => { const b = (prompt('Batch code, as in the timetable') || '').trim(); if (!b) return; const g = (prompt(`Building for ${b}`) || '').trim(); if (!g) return; st.settings.batchBuildings[b] = g; changed(); });
   const filt = (inp, tbl) => on(inp, 'input', e => { const q = e.target.value.toLowerCase(); document.querySelectorAll(`#${tbl} tbody tr`).forEach(tr => tr.classList.toggle('hide', !tr.textContent.toLowerCase().includes(q) && ![...tr.querySelectorAll('input')].some(i => i.value.toLowerCase().includes(q)))); });
@@ -1135,6 +1357,29 @@ function bind() {
   all('[data-pid]', b => b.onclick = () => openEdit(b.dataset.pid));
   on('addSlot', 'click', () => openEdit(null));
   on('dl', 'click', downloadExcel);
+  on('dlRep', 'click', downloadReport);
+  ['expRec', 'expRec2'].forEach(id => on(id, 'click', exportRecords));
+  on('impRec', 'change', e => e.target.files[0] && importRecords(e.target.files[0]).catch(x => alert(x.message)));
+  // reception desk: teacher in-out and student attendance, saved per week without redrawing the page
+  all('[data-recday]', b => b.onclick = () => { st.recDay = b.dataset.recday; render(); });
+  all('[data-as]', el => el.onchange = () => {
+    const k = el.dataset.as, f = el.dataset.f, a = st.att.slots[k] || (st.att.slots[k] = {}); a[f] = el.value;
+    if (f === 'in' && el.value && !a.status) { const p = st.plan.find(x => slotKey(x) === k); a.status = p && toS(el.value) > p.start + 600 ? 'Late' : 'Present'; const sb = el.closest('.card').querySelector('[data-f="status"]'); if (sb) sb.value = a.status; }
+    saveAtt();
+  });
+  all('[data-au]', el => el.onchange = () => {
+    const k = el.dataset.au, f = el.dataset.f, a = st.att.stu[k] || (st.att.stu[k] = {}); a[f] = el.type === 'checkbox' ? el.checked : el.value;
+    if ((f === 'parent' && el.checked) && !a.att) { a.att = 'Present'; const sb = el.closest('tr').querySelector('[data-f="att"]'); if (sb) sb.value = 'Present'; }
+    if (f === 'reason' && el.value && !a.att) { a.att = 'Absent'; const sb = el.closest('tr').querySelector('[data-f="att"]'); if (sb) sb.value = 'Absent'; }
+    saveAtt();
+  });
+  on('saveWeek', 'click', async () => {
+    const rows = st.result.rows, wk = st.settings.weekStart, un = rows.filter(r => !aStu(r.s.roll).att).length;
+    if (un && !confirm(`${un} students are not marked present or absent. Count them as counselled?`)) return;
+    if (st.db.weeks[wk] && !confirm(`The week of ${fmtDate(wk)} is already saved. Replace it with the current attendance?`)) return;
+    st.db.weeks[wk] = rows.filter(r => aStu(r.s.roll).att !== 'Absent').map(r => ({ roll: r.s.roll, name: r.s.name, batch: r.s.batch, date: r.p.date, time: r.time, by: r.p.t, parent: !!aStu(r.s.roll).parent }));
+    await saveDb(); render(); toast(`${st.db.weeks[wk].length} students saved to the records`); T('save_week', { ok: true, students: st.db.weeks[wk].length });
+  });
   on('sSearch', 'input', e => { st.search = e.target.value; const pos = e.target.selectionStart; render(); const i = $('sSearch'); i.focus(); i.setSelectionRange(pos, pos); });
   all('[data-excl]', b => b.onclick = () => { st.excluded.add(b.dataset.excl); assign(); persistEdits(); render(); toast('Seat given to the next student in line'); });
   on('restoreAll', 'click', () => { st.excluded.clear(); assign(); persistEdits(); render(); });
@@ -1152,23 +1397,84 @@ async function saveFile(name, data) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 }
+/* shared Excel styling: one title row, one note row, a header row, then the data */
+function xl(wb) {
+  const s = st.settings, NAVY = 'FF1F3864', CAB = ['FFE2EFDA', 'FFDDEBF7', 'FFFCE4D6', 'FFEADFF3', 'FFF6DCE2', 'FFDFF1F1'], MOVED = 'FFFFE699';
+  const solid = argb => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } }), cabFill = c => solid(CAB[Math.max(0, s.cabins.indexOf(c)) % 6]);
+  const ln = { style: 'thin', color: { argb: 'FFBFC7D5' } }, border = { top: ln, left: ln, bottom: ln, right: ln };
+  function sheet(name, title, sub, headers, widths, rows, o = {}) {
+    const ws = wb.addWorksheet(name, { views: [{ state: 'frozen', ySplit: 3, xSplit: o.xSplit || 0 }] });
+    ws.mergeCells(1, 1, 1, headers.length); ws.getCell(1, 1).value = title; ws.getCell(1, 1).font = { name: 'Arial', bold: true, size: 14, color: { argb: NAVY } };
+    ws.getCell(2, 1).value = sub; ws.getCell(2, 1).font = { name: 'Arial', italic: true, size: 9, color: { argb: 'FF595959' } };
+    const hr = ws.getRow(3); headers.forEach((h, i) => { const c = hr.getCell(i + 1); c.value = h; c.font = { name: 'Arial', bold: true, color: { argb: 'FFFFFFFF' }, size: 10 }; c.fill = solid(i < (o.key || 0) ? 'FF2F5597' : NAVY); c.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; c.border = border; });
+    hr.height = 30; widths.forEach((w, i) => ws.getColumn(i + 1).width = w);
+    rows.forEach((vals, ri) => { const row = ws.getRow(ri + 4); vals.forEach((v, ci) => { const c = row.getCell(ci + 1); c.value = v; c.font = { name: 'Arial', size: 10, bold: (o.bold || []).includes(ci) }; c.border = border; c.alignment = { vertical: 'middle', horizontal: (o.left || []).includes(ci) ? 'left' : 'center' }; }); if (o.style) o.style(row, ri); });
+    if (rows.length) ws.autoFilter = { from: { row: 3, column: 1 }, to: { row: rows.length + 3, column: headers.length } };
+    return ws;
+  }
+  return { sheet, solid, cabFill, border, NAVY, MOVED };
+}
+function sheetAnnounce(x) {
+  x.sheet('Announcements', 'ANNOUNCEMENT SHEET · STUDENTS WITH COUNSELLING THIS WEEK', `Week ${weekText()}. In building, floor and room order, so the announcement can be made class by class.`,
+    ['Building', 'Floor', 'Room No.', 'Batch', 'Student Name', 'Roll No.', 'Day', 'Date', 'Time', 'Teacher', 'Cabin', 'Venue'], [10, 8, 9, 9, 26, 11, 11, 11, 8, 20, 7, 14],
+    annRows().map(a => [a.bld, a.fl, a.room, a.r.s.batch, a.r.s.name, a.r.s.roll, a.r.p.day, fmtDate(a.r.p.date), a.r.time, tName(a.r.p.t), a.r.p.cabin, a.r.p.venue]), { left: [4, 9], bold: [3, 4] });
+}
+function sheetInOut(x) {
+  const w = weekStats(), cnt = st.result.counts;
+  x.sheet('Teacher In-Out', 'COUNSELLING TEACHER IN-OUT', `Week ${weekText()}. Reception fills Actual In, Actual Out, Teacher Status and Call Status. Present, parents and absent come from the student attendance.`,
+    ['Date', 'Short Code', 'Teacher Name', 'Slot', 'Total Students', 'Slot Start Time', 'Slot Over Time', 'Actual In Time', 'Actual Out Time', 'Teacher Status', 'Teacher Call Status', 'Allotted Cabin No.', 'Building', 'Total Present', 'No. of Parents In', 'Total Absent', 'Remark'],
+    [11, 8, 20, 6, 9, 9, 9, 9, 9, 10, 10, 9, 10, 9, 9, 9, 30],
+    st.plan.map(p => { const a = aSlot(p), z = w.slot[p.id], m = z.P + z.A > 0; return [fmtDate(p.date), p.t, tName(p.t), p.shift, cnt[p.id] || 0, E.hm(p.start), E.hm(p.end), a.in || '', a.out || '', a.status || '', a.call || '', p.cabin, p.building || '', m ? z.P : '', m ? z.par : '', m ? z.A : '', a.remark || '']; }),
+    { left: [2, 16], style: row => { row.height = 22; } });
+}
+function sheetAttendance(x) {
+  x.sheet('Student Attendance', 'COUNSELLING STUDENT ATTENDANCE', `Week ${weekText()}. Reception marks Present or Absent, and whether a parent came.`,
+    ['Sr.', 'Date', 'Day', 'Time', 'Period', 'Cabin', 'Building', 'Teacher Code', 'Teacher Name', 'Roll No.', 'Student Name', 'Batch', 'Attendance', 'Parent Came', 'Absent Reason'],
+    [6, 11, 11, 8, 7, 7, 10, 9, 20, 11, 26, 8, 11, 10, 30],
+    st.result.rows.map((r, i) => { const a = aStu(r.s.roll); return [i + 1, fmtDate(r.p.date), r.p.day, r.time, r.p.shift, r.p.cabin, r.p.building || '', r.p.t, tName(r.p.t), r.s.roll, r.s.name, r.s.batch, a.att || '', a.parent ? 'Yes' : (a.att ? 'No' : ''), a.reason || '']; }),
+    { left: [8, 10, 14], bold: [10] });
+}
+function sheetAbsent(x) {
+  const rows = st.result.rows.filter(r => aStu(r.s.roll).att === 'Absent');
+  x.sheet('Absent Remarks', 'ABSENT STUDENTS', `Week ${weekText()}. Students marked absent stay in the queue for next week.`,
+    ['Roll Number', 'Student Name', 'Batch', 'Date', 'Time', 'Shift', 'Counsellor', 'Building', 'Absent Reason'], [12, 26, 8, 11, 8, 9, 11, 10, 40],
+    rows.map(r => [r.s.roll, r.s.name, r.s.batch, fmtDate(r.p.date), r.time, r.p.shift[0] === 'M' ? 'Morning' : 'Evening', r.p.t, st.settings.batchBuildings[r.s.batch] || '', aStu(r.s.roll).reason || '']), { left: [1, 8] });
+}
+function sheetSummary(x) {
+  const w = weekStats(), t = w.tot, cov = st.result.coverage || { active: 0, done: 0 };
+  const line = (label, date, z) => [label, date, z.slots, z.tin, z.late, z.tabs, z.booked, z.P, z.A, z.U, z.par];
+  const ws = x.sheet('Weekly Summary', 'COUNSELLING WEEKLY REPORT', `Week ${weekText()}. Students in this week’s batches: ${cov.active}, counselled at least once before this week: ${cov.done}.`,
+    ['Day', 'Date', 'Slots', 'Teachers Came', 'Late', 'Teacher Absent', 'Students Booked', 'Present', 'Absent', 'Not Marked', 'Parents Came'], [12, 11, 8, 10, 8, 10, 10, 9, 9, 10, 10],
+    E.DAYS.filter(d => w.day[d].slots).map(d => line(d, fmtDate(dayDate(d)), w.day[d])).concat([line('Week', '', t)]), { left: [0] });
+  ws.getRow(ws.rowCount).eachCell(c => { c.font = { name: 'Arial', bold: true, size: 10 }; });
+}
+async function downloadReport() {
+  busy(true, 'Building the report…'); await nextFrame();
+  try {
+    const wb = new ExcelJS.Workbook(), x = xl(wb);
+    sheetSummary(x); sheetInOut(x); sheetAttendance(x); sheetAbsent(x);
+    const buf = await wb.xlsx.writeBuffer(); const t = weekStats().tot;
+    T('download_report', { ok: true, booked: t.booked, marked: t.P + t.A });
+    await saveFile(`Counselling_Report_${st.settings.weekStart}.xlsx`, new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  } catch (e) { T('download_report', { ok: false }); alert('The report could not be built: ' + e.message); console.error(e); }
+  busy(false);
+}
+async function exportRecords() {
+  try {
+    const wb = new ExcelJS.Workbook(), x = xl(wb), list = dbRecs().sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : nat(a.roll, b.roll));
+    x.sheet('Counselling records', 'COUNSELLING RECORDS', 'Saved from the Counselling Planner. Import this file on another computer, or add the rows to the student file.',
+      ['Roll No.', 'Student Name', 'Batch', 'Date', 'Time', 'Counsellor', 'Parent Came'], [12, 26, 9, 12, 8, 11, 11],
+      list.map(r => [r.roll, r.name, r.batch, fmtDate(r.date), r.time || '', r.by, r.parent ? 'Yes' : 'No']), { left: [1] });
+    const buf = await wb.xlsx.writeBuffer(); T('export_records', { ok: true, rows: list.length });
+    await saveFile(`Counselling_Records_${new Date().toISOString().slice(0, 10)}.xlsx`, new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  } catch (e) { alert('The records could not be exported: ' + e.message); }
+}
 async function downloadExcel() {
   busy(true, 'Building the Excel file…'); await nextFrame();
   try {
     const wb = new ExcelJS.Workbook(), s = st.settings, r = st.result, cnt = r.counts, SH = E.SLOTS.filter(x => shifts().includes(x) || st.plan.some(p => p.shift === x));
-    const NAVY = 'FF1F3864', CAB = ['FFE2EFDA', 'FFDDEBF7', 'FFFCE4D6', 'FFEADFF3', 'FFF6DCE2', 'FFDFF1F1'], MOVED = 'FFFFE699';
-    const solid = argb => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } }), cabFill = c => solid(CAB[Math.max(0, s.cabins.indexOf(c)) % 6]);
-    const ln = { style: 'thin', color: { argb: 'FFBFC7D5' } }, border = { top: ln, left: ln, bottom: ln, right: ln };
-    const weekTxt = `${fmtDate(s.weekStart)} – ${fmtDate(E.addDays(s.weekStart, 5))}`;
-    function sheet(name, title, sub, headers, widths, rows, o = {}) {
-      const ws = wb.addWorksheet(name, { views: [{ state: 'frozen', ySplit: 3, xSplit: o.xSplit || 0 }] });
-      ws.mergeCells(1, 1, 1, headers.length); ws.getCell(1, 1).value = title; ws.getCell(1, 1).font = { name: 'Arial', bold: true, size: 14, color: { argb: NAVY } };
-      ws.getCell(2, 1).value = sub; ws.getCell(2, 1).font = { name: 'Arial', italic: true, size: 9, color: { argb: 'FF595959' } };
-      const hr = ws.getRow(3); headers.forEach((h, i) => { const c = hr.getCell(i + 1); c.value = h; c.font = { name: 'Arial', bold: true, color: { argb: 'FFFFFFFF' }, size: 10 }; c.fill = solid(i < (o.key || 0) ? 'FF2F5597' : NAVY); c.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; c.border = border; });
-      hr.height = 30; widths.forEach((w, i) => ws.getColumn(i + 1).width = w);
-      rows.forEach((vals, ri) => { const row = ws.getRow(ri + 4); vals.forEach((v, ci) => { const c = row.getCell(ci + 1); c.value = v; c.font = { name: 'Arial', size: 10, bold: (o.bold || []).includes(ci) }; c.border = border; c.alignment = { vertical: 'middle', horizontal: (o.left || []).includes(ci) ? 'left' : 'center' }; }); if (o.style) o.style(row, ri); });
-      if (rows.length) ws.autoFilter = { from: { row: 3, column: 1 }, to: { row: rows.length + 3, column: headers.length } };
-    }
+    const X = xl(wb), { sheet, solid, cabFill, border, NAVY, MOVED } = X;
+    const weekTxt = weekText();
     const g = wb.addWorksheet('Cabin Schedule', { views: [{ state: 'frozen', ySplit: 3 }] });
     g.mergeCells(1, 1, 1, 3 + s.cabins.length); g.getCell(1, 1).value = `COUNSELLING CABIN SCHEDULE  ·  ${weekTxt}`; g.getCell(1, 1).font = { name: 'Arial', bold: true, size: 14, color: { argb: NAVY } };
     g.getCell(2, 1).value = 'One teacher per cabin per slot. Yellow = moved from the timetable slot.'; g.getCell(2, 1).font = { name: 'Arial', italic: true, size: 9, color: { argb: 'FF595959' } };
@@ -1177,7 +1483,7 @@ async function downloadExcel() {
     for (const d of E.DAYS) {
       const dr = g.getRow(gr); dr.getCell(1).value = `${d.toUpperCase()}  ·  ${fmtDate(dayDate(d))}`; dr.getCell(1).font = { name: 'Arial', bold: true, size: 11, color: { argb: NAVY } };
       for (let c = 1; c <= 3 + s.cabins.length; c++) dr.getCell(c).fill = solid('FFD9E2F3');
-      gr++; const hr = g.getRow(gr); ['Day', 'Period', 'Time'].concat(s.cabins.map(c => `Cabin ${c}`)).forEach((h, i) => { const c = hr.getCell(i + 1); c.value = h; c.font = { name: 'Arial', bold: true, color: { argb: 'FFFFFFFF' } }; c.fill = solid(NAVY); c.alignment = { horizontal: 'center' }; c.border = border; }); gr++;
+      gr++; const hr = g.getRow(gr); ['Day', 'Period', 'Time'].concat(s.cabins.map(c => `Cabin ${c}${(s.cabinBuildings || {})[c] ? ' · ' + s.cabinBuildings[c] : ''}`)).forEach((h, i) => { const c = hr.getCell(i + 1); c.value = h; c.font = { name: 'Arial', bold: true, color: { argb: 'FFFFFFFF' } }; c.fill = solid(NAVY); c.alignment = { horizontal: 'center' }; c.border = border; }); gr++;
       for (const sh of SH) {
         const row = g.getRow(gr); row.height = 48;
         [d.slice(0, 3), sh, `${s.shifts[sh][0]}–${s.shifts[sh][1]}`].forEach((v, i) => { const c = row.getCell(i + 1); c.value = v; c.font = { name: 'Arial', size: 10, bold: i === 1 }; c.border = border; c.alignment = { horizontal: 'center', vertical: 'middle' }; });
@@ -1211,6 +1517,7 @@ async function downloadExcel() {
       s.rules.map((x, i) => [i + 1, x.name, x.on ? 'Yes' : 'No', (T_TYPES.find(t => t[0] === x.tType) || ['', ''])[1] + (x.tValue ? ': ' + x.tValue : ''), (S_TYPES.find(t => t[0] === x.sType) || ['', ''])[1] + (x.sValue ? ': ' + x.sValue : '')]), { left: [1, 3, 4] });
     sheet('Moves and Notes', 'SLOT MOVES AND NOTES', 'Moves were made because a period had more teachers than cabins.', ['Type', 'Detail'], [16, 110],
       st.moves.map(m => ['Moved', `${m.t} (${tName(m.t)}): ${m.from} → ${m.to}`]).concat(st.planWarnings.map(x => ['Note', x]), r.warnings.map(x => ['Note', x]), (r.invalid || []).map(x => ['Check', x])), { left: [1] });
+    sheetAnnounce(X); sheetInOut(X); sheetAttendance(X);
     const buf = await wb.xlsx.writeBuffer();
     T('download_excel', { ok: true, booked: r.rows.length, slots: st.plan.length });
     await saveFile(`Counselling_Schedule_${s.weekStart}.xlsx`, new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
@@ -1234,9 +1541,10 @@ $('themeBtn').onclick = () => { const cur = document.documentElement.getAttribut
 (async function init() {
   st.settings = loadSettings(); render();
   if (!window.XLSX || !window.ExcelJS) $('main').insertAdjacentHTML('afterbegin', '<div class="notice e">The Excel libraries did not load. Check the internet connection and reload the page.</div>');
+  const db = await idb.get('db'); if (db && db.weeks) st.db = db;
   const t = await idb.get('tt'); if (t) { st.tt = t.tt; st.ttName = t.name; }
   const r = await idb.get('rec'); if (r) { st.records = r.recs; st.recMeta = r.meta; st.recName = r.name; rebuildStudents(); }
-  restoreEdits(); if (st.plan) st.step = 1; render();
+  await loadAtt(); restoreEdits(); if (st.plan) st.step = 1; render();
 })();
 </script>
 </body>
