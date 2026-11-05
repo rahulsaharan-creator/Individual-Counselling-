@@ -31,15 +31,7 @@ How students are matched:
 - Senior faculty (12th and Target teachers) are never moved when cabins are full.
 - Every student is counselled once before anyone is booked again. A switch can fill the seats this leaves empty.
 
-Settings, the last schedule, attendance and the counselling records are saved in the browser. Export the records from the Dashboard to keep a copy in Drive. Use **Rules and lists → Export settings** to copy them to another computer.
-
-## Shared database (Supabase)
-Without a database, everything stays in the browser that entered it. With one, the planner and reception share the week, the attendance and the counselling records from any computer.
-1. In Vercel, open the project → **Storage** → **Create** → **Supabase**, and connect it to this project. This adds `POSTGRES_URL` and the other database settings.
-2. In **Settings → Environment Variables**, add `PLANNER_PIN` and `RECEPTION_PIN` (at least 6 characters each, different from each other).
-3. Redeploy. The site then asks for a PIN. The planner PIN opens everything; the reception PIN opens only the Reception page, where reception enters teacher and student in-out times, attendance and whether a parent came.
-
-`api/db.js` is the only code that talks to the database, and it creates its tables on first use. The tables have row level security switched on with no policies, so Supabase's public API cannot read them. Student names, roll numbers, batches and attendance are stored there.
+Settings, the last schedule, attendance and the counselling records are saved only on this computer, in this browser. Nothing is sent to a server. Do reception and planning in the same browser on the same computer, and export the records from the Dashboard every week to keep a copy. Use **Rules and lists → Export settings** to copy them to another computer.
 
 ## Changing the code
 `source/` holds the editable files. After editing `src.html` or `engine.js`, run `node source/build.js` from inside `source/` and copy `source/dist/index.html` over `index.html`.

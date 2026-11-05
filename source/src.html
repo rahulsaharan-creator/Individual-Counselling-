@@ -236,7 +236,6 @@ dialog form{display:flex;flex-direction:column;height:100%}
   <div class="bar">
     <div class="mark" aria-hidden="true">C</div>
     <div class="brand"><b>Counselling Planner</b><span id="weekLabel">No week loaded</span></div>
-    <span id="who"></span>
     <button class="btn ghost icon-btn" id="themeBtn" type="button" aria-label="Switch between light and dark">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
     <button class="btn primary" id="calcBtn" type="button" disabled><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 21v-5h5"/></svg><span class="calc-label" id="calcLabel">Calculate schedule</span></button>
@@ -278,7 +277,7 @@ const ICON = {
 /* ---------- state ---------- */
 const st = { step: 0, view: 'board', settings: null, tt: null, ttName: '', records: null, recMeta: null, recName: '', students: null,
   plan: null, moves: [], planWarnings: [], result: null, excluded: new Set(), search: '',
-  att: { slots: {}, stu: {} }, db: { weeks: {} }, recDay: '', keep: {}, pub: null, deskView: 'reception' };
+  att: { slots: {}, stu: {} }, db: { weeks: {} }, recDay: '', keep: {} };
 const CLASSES = ['', '11th', '12th', 'Target', 'FTP'];
 const BLDS = () => [...new Set(st.settings.knownBuildings.concat(['M3 old']))];
 
@@ -301,42 +300,12 @@ function loadSettings() {
 const slotKey = p => `${p.t}|${p.date || p.day}|${p.shift}`;
 const aSlot = p => st.att.slots[slotKey(p)] || {};
 const aStu = roll => st.att.stu[roll] || {};
-/* shared database: Supabase through the /api/db function. Off (everything stays in this browser) until the
-   Vercel project has the database and both PINs; then everyone signs in with the planner or reception PIN. */
-const cloud = { configured: false, role: null, pin: '', recs: [], weeks: [], pubAt: '', pubErr: '', timer: null };
-const PINKEY = 'mcs_planner_pin';
-async function api(action, data = {}) {
-  const r = await fetch('/api/db', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-pin': cloud.pin }, body: JSON.stringify({ action, ...data }) });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw Object.assign(new Error(j.error || 'The database did not answer (' + r.status + ').'), { status: r.status });
-  return j;
-}
-async function cloudStatus() {
-  if (!/^https?:/.test(location.protocol)) return false;
-  try { const r = await fetch('/api/db', { cache: 'no-store' }); return r.ok && !!(await r.json()).configured; } catch (e) { return false; }
-}
-const localRecs = () => Object.entries(st.db.weeks || {}).flatMap(([week, l]) => l.map(x => ({ ...x, week })));
-const dbRecs = () => cloud.role === 'planner' ? cloud.recs : localRecs();
-async function loadRecs() { if (cloud.role === 'planner') cloud.recs = (await api('records')).records || []; }
-async function loadAtt() {
-  const w = cloud.role === 'reception' ? st.recWeek : st.settings.weekStart;
-  if (cloud.role) {
-    if (!w) { st.att = { slots: {}, stu: {} }; return; }
-    try { const r = await api('getWeek', { week: w }); st.att = r.att || { slots: {}, stu: {} }; if (cloud.role === 'reception') st.pub = r.schedule ? { week: r.schedule.week, slots: r.schedule.slots, rows: r.schedule.rows, at: r.schedule.published_at } : null; }
-    catch (e) { toast(e.message); }
-    return;
-  }
-  st.att = (w && await idb.get('att:' + w)) || { slots: {}, stu: {} };
-}
+// counselling records and attendance are kept in this browser only (IndexedDB on this computer)
+const dbRecs = () => Object.entries(st.db.weeks || {}).flatMap(([week, l]) => l.map(x => ({ ...x, week })));
+async function loadAtt() { const w = st.settings.weekStart; st.att = (w && await idb.get('att:' + w)) || { slots: {}, stu: {} }; }
 const saveAtt = () => idb.set('att:' + st.settings.weekStart, st.att);
 const saveDb = () => idb.set('db', st.db);
-// only reception enters attendance once the database is on; without it, whoever uses this browser can
-const canEnter = () => cloud.configured ? cloud.role === 'reception' : true;
-async function setAtt(kind, key, data) {
-  const store = kind === 'slot' ? st.att.slots : st.att.stu; store[key] = { ...(store[key] || {}), ...data };
-  if (cloud.role === 'reception') { try { await api(kind === 'slot' ? 'setSlotAtt' : 'setStuAtt', { week: st.pub.week, key, data }); } catch (e) { toast('Not saved: ' + e.message); } }
-  else if (!cloud.configured) saveAtt();
-}
+function setAtt(kind, key, data) { const store = kind === 'slot' ? st.att.slots : st.att.stu; store[key] = { ...(store[key] || {}), ...data }; saveAtt(); }
 // the week as reception sees it: slots and booked students, with the class room of each student
 function pubData() {
   const s = st.settings, rm = s.batchRooms || {};
@@ -344,39 +313,7 @@ function pubData() {
     slots: st.plan.map(p => ({ key: slotKey(p), t: p.t, name: tName(p.t), day: p.day, date: p.date, shift: p.shift, cabin: p.cabin || '', building: p.building || '', venue: p.venue || '', start: E.hm(p.start), end: E.hm(p.end) })),
     rows: st.result.rows.map(r => ({ roll: r.s.roll, name: r.s.name, batch: r.s.batch, slot: slotKey(r.p), time: r.time, bld: s.batchBuildings[r.s.batch] || '', fl: (rm[r.s.batch] || {}).floor || '', room: (rm[r.s.batch] || {}).room || '' })) };
 }
-const recModel = () => cloud.role === 'reception' ? st.pub : (st.plan && st.result ? pubData() : null);
-function schedulePublish() { if (cloud.role !== 'planner' || !st.plan) return; clearTimeout(cloud.timer); cloud.timer = setTimeout(publishNow, 1200); }
-async function publishNow() {
-  try { const r = await api('publish', pubData()); cloud.pubAt = r.at; cloud.pubErr = ''; } catch (e) { cloud.pubErr = e.message; }
-  const el = $('pubState'); if (el) el.innerHTML = pubState();
-}
-const pubState = () => cloud.role !== 'planner' ? '' : cloud.pubErr ? `<span class="badge warn">Not shared with reception: ${esc(cloud.pubErr)}</span>`
-  : cloud.pubAt ? `<span class="badge ok">Shared with reception ${new Date(cloud.pubAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>` : '<span class="badge">Sharing with reception…</span>';
-function signIn(msg) {
-  $('dlgForm').innerHTML = `<div class="hd"><h3 id="dlgTitle">Sign in</h3><p class="muted" style="margin:4px 0 0">Enter the planner PIN or the reception PIN.</p></div>
-    <div class="bd"><div><label class="f" for="pinIn">PIN</label><input class="input" id="pinIn" type="password" autocomplete="current-password" style="width:100%"></div>
-    <div class="check" id="pinMsg" aria-live="polite" style="color:var(--danger)">${esc(msg || '')}</div></div>
-    <div class="ft"><span></span><button class="btn primary" type="submit" id="pinGo">Sign in</button></div>`;
-  $('dlgForm').onsubmit = async e => {
-    e.preventDefault(); const v = $('pinIn').value.trim(); if (!v) return;
-    cloud.pin = v; $('pinGo').disabled = true;
-    try { const r = await api('whoami'); cloud.role = r.role; try { localStorage.setItem(PINKEY, v); } catch (x) {} $('dlgForm').onsubmit = null; $('dlg').close(); await afterSignIn(); }
-    catch (x) { $('pinMsg').textContent = x.message; $('pinGo').disabled = false; }
-  };
-  $('dlg').oncancel = e => e.preventDefault();
-  $('dlg').showModal(); setTimeout(() => $('pinIn').focus(), 50);
-}
-async function afterSignIn() {
-  $('dlg').oncancel = null;
-  if (cloud.role === 'reception') {
-    try { cloud.weeks = (await api('weeks')).weeks || []; } catch (e) { cloud.weeks = []; toast(e.message); }
-    const today = new Date().toISOString().slice(0, 10);
-    st.recWeek = (cloud.weeks.find(w => w.week <= today) || cloud.weeks[cloud.weeks.length - 1] || {}).week || '';
-    await loadAtt(); render(); return;
-  }
-  try { await loadRecs(); } catch (e) { toast(e.message); }
-  rebuildStudents(); await loadAtt(); if (st.plan && st.students) { assign(); schedulePublish(); } render();
-}
+const recModel = () => st.plan && st.result ? pubData() : null;
 function saveSettings() { try { localStorage.setItem(KEY, JSON.stringify(st.settings)); } catch (e) { toast('Settings could not be saved in this browser.'); } }
 const idb = {
   open() { return new Promise((res, rej) => { if (!window.indexedDB) return rej(new Error('no idb')); const r = indexedDB.open('mcs_planner', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); },
@@ -476,12 +413,8 @@ async function importRecords(file) {
   const p = E.parseStudents(wb.SheetNames.map(n => ({ name: n, rows: rowsOf(wb.Sheets[n]) })), Object.keys(st.settings.teachers));
   const list = p.records.filter(r => r.date && r.by).map(r => { const d = r.date.toISOString().slice(0, 10); return { roll: r.roll, name: r.name, batch: r.batch, date: d, week: E.addDays(d, -((r.date.getUTCDay() + 6) % 7)), time: '', by: r.by, parent: false }; });
   if (!list.length) return toast('No records found (needs Roll No., Batch, Date and Counsellor columns)');
-  await addRecords(list); toast(`${list.length} records imported`);
-}
-async function addRecords(list) {
-  if (cloud.role === 'planner') { busy(true, 'Saving to the database…'); try { await api('importRecords', { list }); await loadRecs(); } finally { busy(false); } }
-  else { for (const x of list) { const L = st.db.weeks[x.week] || (st.db.weeks[x.week] = []); if (!L.some(y => y.roll === x.roll && y.date === x.date)) L.push(x); } await saveDb(); }
-  rebuildStudents(); changed();
+  for (const x of list) { const L = st.db.weeks[x.week] || (st.db.weeks[x.week] = []); if (!L.some(y => y.roll === x.roll && y.date === x.date)) L.push(x); }
+  await saveDb(); rebuildStudents(); changed(); toast(`${list.length} records imported`);
 }
 async function importTeachers(file) {
   const wb = await readWorkbook(file); let n = 0;
@@ -526,7 +459,6 @@ function assign() {
 }
 function persistEdits() {
   try { localStorage.setItem(EDITKEY, JSON.stringify({ week: st.settings.weekStart, plan: st.plan, moves: st.moves, planWarnings: st.planWarnings, excluded: [...st.excluded], keep: st.keep })); } catch (e) {}
-  schedulePublish();
 }
 function restoreEdits() {
   try { const e = JSON.parse(localStorage.getItem(EDITKEY) || 'null');
@@ -536,14 +468,7 @@ function changed(redraw = true) { saveSettings(); if (st.plan) { st.keep = {}; a
 
 /* ---------- render ---------- */
 function render() {
-  const s = st.settings, desk = cloud.role === 'reception';
-  $('who').innerHTML = cloud.role ? `<button class="btn ghost sm" type="button" id="signOut" title="Sign out">${cloud.role === 'reception' ? 'Reception' : 'Planner'} · Sign out</button>` : '';
-  document.querySelector('.stepper').hidden = desk; $('calcBtn').hidden = desk;
-  if (desk) {
-    $('weekLabel').textContent = st.pub ? `Week of ${fmtShort(st.pub.week)} – ${fmtShort(E.addDays(st.pub.week, 5))} ${st.pub.week.slice(0, 4)}` : 'Reception';
-    if (window.__plannerPage !== 'Reception desk') { window.__plannerPage = 'Reception desk'; T('page_view', { feature: 'Reception desk' }); }
-    $('main').innerHTML = viewDesk(); bind(); return;
-  }
+  const s = st.settings;
   $('weekLabel').textContent = s.weekStart ? `Week of ${fmtShort(s.weekStart)} – ${fmtShort(E.addDays(s.weekStart, 5))} ${s.weekStart.slice(0, 4)}` : 'No week loaded';
   $('calcBtn').disabled = !ready(); $('calcLabel').textContent = st.plan ? 'Recalculate' : 'Calculate schedule';
   document.querySelectorAll('.stepper button').forEach(b => {
@@ -574,8 +499,8 @@ function viewUpload() {
       <div class="status">${rc ? `<span class="badge ok">Loaded</span> <b>${esc(st.recName)}</b><br><span class="muted">${st.students ? st.students.size.toLocaleString() : 0} students from ${rc.map(u => esc(u.sheet)).join(', ')}</span>` : '<span class="muted">Choose a file or drop it here</span>'}</div></label>
   </div>
   ${tt && tt.warnings.length ? `<div class="notice w" style="margin-top:16px"><b>Timetable notes</b><ul>${tt.warnings.map(w => `<li>${esc(w)}</li>`).join('')}</ul></div>` : ''}
-  <div class="optline" style="margin-top:16px;display:block"><b>Counselling records database${cloud.role ? ' (shared database)' : ' (this browser only)'}</b> <span class="muted">${dbRecs().length.toLocaleString()} students counselled across ${new Set(dbRecs().map(x => x.week)).size} saved week${new Set(dbRecs().map(x => x.week)).size === 1 ? '' : 's'}. They count as history together with the student file, so the same students are not booked again until everyone has had a turn. Save a week from Weekly schedule → Dashboard.</span>
-    <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap"><button class="btn sm" type="button" id="expRec2" ${dbRecs().length ? '' : 'disabled'}>Export records (Excel)</button><label class="btn sm" style="cursor:pointer">Import records<input type="file" accept=".xlsx,.xls" id="impRec" class="hide"></label>${cloud.role === 'planner' && localRecs().length ? `<button class="btn sm" type="button" id="copyRec">Copy ${localRecs().length} records from this browser to the database</button>` : ''}</div></div>
+  <div class="optline" style="margin-top:16px;display:block"><b>Counselling records database (kept on this computer)</b> <span class="muted">${dbRecs().length.toLocaleString()} students counselled across ${new Set(dbRecs().map(x => x.week)).size} saved week${new Set(dbRecs().map(x => x.week)).size === 1 ? '' : 's'}. They count as history together with the student file, so the same students are not booked again until everyone has had a turn. Save a week from Weekly schedule → Dashboard.</span>
+    <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap"><button class="btn sm" type="button" id="expRec2" ${dbRecs().length ? '' : 'disabled'}>Export records (Excel)</button><label class="btn sm" style="cursor:pointer">Import records<input type="file" accept=".xlsx,.xls" id="impRec" class="hide"></label></div></div>
   ${tt || rc ? '<div style="margin-top:14px"><button class="btn ghost danger sm" type="button" id="clearData">Remove uploaded files</button></div>' : ''}`;
 }
 
@@ -683,7 +608,7 @@ function viewSchedule() {
   const notes = [...(r.invalid || []).map(x => ['e', x]), ...st.planWarnings.map(x => ['w', x]), ...r.warnings.map(x => ['w', x])];
   const views = [['board', 'Cabin board'], ['sessions', 'Teacher sessions'], ['students', 'Students'], ['reception', 'Reception'], ['announce', 'Announcements'], ['dash', 'Dashboard'], ['workload', 'Workload'], ['notes', `Moves and notes · ${st.moves.length + notes.length}`]];
   return head('Weekly schedule', 'Select a slot on the board to move it, change its students or remove it. The student list updates straight away.',
-    `<span id="pubState" style="align-self:center">${pubState()}</span><button class="btn" type="button" id="addSlot">${ICON.plus}Add slot</button><button class="btn" type="button" id="dlRep">${ICON.dl}Download report</button><button class="btn primary" type="button" id="dl">${ICON.dl}Download Excel</button>`)
+    `<button class="btn" type="button" id="addSlot">${ICON.plus}Add slot</button><button class="btn" type="button" id="dlRep">${ICON.dl}Download report</button><button class="btn primary" type="button" id="dl">${ICON.dl}Download Excel</button>`)
   + `<div class="kpis"><div class="kpi"><b>${st.plan.length}</b><span>Counselling slots</span></div><div class="kpi"><b>${r.rows.length}</b><span>Students booked of ${cap} seats</span></div>
      <div class="kpi"><b>${st.moves.length}</b><span>Slots moved to a free cabin</span></div><div class="kpi"><b>${r.repeatSkips}</b><span>Repeat teachers avoided</span></div></div>
   ${notes.some(n => n[0] === 'e') ? `<div class="notice e"><b>Fix before sending</b><ul>${notes.filter(n => n[0] === 'e').map(n => `<li>${esc(n[1])}</li>`).join('')}</ul></div>` : ''}
@@ -721,14 +646,13 @@ const bldOrder = b => { const i = cabinGroups().findIndex(g => g.b === b); retur
 const selBox = (attr, val, opts, label) => `<select class="input sm" ${attr} aria-label="${esc(label)}">${opts.map(o => `<option ${o === (val || '') ? 'selected' : ''} value="${esc(o)}">${o || '—'}</option>`).join('')}</select>`;
 function vReception(m) {
   if (!m) return '<div class="notice i">No schedule for this week yet.</div>';
-  const days = E.DAYS.filter(d => m.slots.some(p => p.day === d)), edit = canEnter(), dis = edit ? '' : 'disabled';
+  const days = E.DAYS.filter(d => m.slots.some(p => p.day === d)), dis = '';
   if (!days.includes(st.recDay)) { const today = new Date().toISOString().slice(0, 10); st.recDay = days.find(d => (m.slots.find(p => p.day === d) || {}).date === today) || days[0] || 'Monday'; }
   const byS = {}; m.rows.forEach(r => (byS[r.slot] = byS[r.slot] || []).push(r));
   const slots = m.slots.filter(p => p.day === st.recDay).sort((a, b) => bldOrder(a.building) - bldOrder(b.building) || E.SLOTS.indexOf(a.shift) - E.SLOTS.indexOf(b.shift) || nat(a.cabin, b.cabin));
   const date = (m.slots.find(p => p.day === st.recDay) || {}).date;
   let lastB = null;
-  return `${edit ? `<p class="muted" style="margin-top:0">Enter each teacher’s and each student’s in and out time, and whether a parent came. Entering a student’s in time marks them present. ${cloud.role ? 'Every entry is saved to the database straight away.' : 'Entries are saved in this browser.'} A teacher who comes more than 10 minutes after the slot starts is marked late.</p>`
-    : `<div class="notice i">Only reception can enter in-out times and attendance. You can see what reception has entered. <button class="btn sm" type="button" id="attRefresh">Refresh</button></div>`}
+  return `<p class="muted" style="margin-top:0">Enter each teacher’s and each student’s in and out time, and whether a parent came. Entering a student’s in time marks them present. Entries are saved on this computer. A teacher who comes more than 10 minutes after the slot starts is marked late.</p>
   <div class="tabs" style="margin-bottom:14px">${days.map(d => { const dt = (m.slots.find(p => p.day === d) || {}).date; return `<button type="button" class="${d === st.recDay ? 'on' : ''}" data-recday="${d}">${d.slice(0, 3)} ${fmtShort(dt)}</button>`; }).join('')}</div>
   ${slots.map(p => {
     const a = st.att.slots[p.key] || {}, k = esc(p.key), rows = (byS[p.key] || []).sort((x, y) => x.time < y.time ? -1 : 1);
@@ -755,22 +679,11 @@ function vAnnounce(m) {
   const rows = annRows(m), groups = []; let g = null;
   for (const x of rows) { const key = [x.bld, x.fl, x.room, x.r.batch].join('|'); if (!g || g.key !== key) groups.push(g = { key, bld: x.bld, fl: x.fl, room: x.room, batch: x.r.batch, list: [] }); g.list.push(x); }
   const missing = [...new Set(rows.filter(x => !x.room).map(x => x.r.batch))];
-  return `<p class="muted" style="margin-top:0">One row per class room, in building, floor and room order, so the announcement can be made class by class. ${groups.length} classes, ${rows.length} students.${cloud.role === 'reception' ? '' : ' The Excel download has the same list in the “Announcements” sheet.'}</p>
-  ${missing.length && cloud.role !== 'reception' ? `<div class="notice w">No room number for <b>${missing.map(esc).join(', ')}</b>. Add it under Set up → Batch buildings.</div>` : ''}
+  return `<p class="muted" style="margin-top:0">One row per class room, in building, floor and room order, so the announcement can be made class by class. ${groups.length} classes, ${rows.length} students. The Excel download has the same list in the “Announcements” sheet.</p>
+  ${missing.length ? `<div class="notice w">No room number for <b>${missing.map(esc).join(', ')}</b>. Add it under Set up → Batch buildings.</div>` : ''}
   <div class="tbl"><table><thead><tr><th>Building</th><th>Floor</th><th>Room</th><th>Batch</th><th>Students with counselling this week</th></tr></thead><tbody>
   ${groups.map(g => `<tr><td><b>${esc(g.bld || '—')}</b></td><td>${esc(g.fl || '—')}</td><td>${esc(g.room || '—')}</td><td><b>${esc(g.batch)}</b></td>
     <td style="white-space:normal;min-width:420px">${g.list.map(x => `${esc(x.r.name)} <span class="muted">(${esc(x.r.roll)}) · ${x.p.day.slice(0, 3)} ${fmtShort(x.p.date)} ${esc(x.r.time)} · ${esc(x.p.venue)}, cabin ${esc(x.p.cabin)} · ${esc(x.p.name)}</span>`).join('<br>')}</td></tr>`).join('')}</tbody></table></div>`;
-}
-// the page reception sees after signing in
-function viewDesk() {
-  const m = st.pub, wk = cloud.weeks;
-  const pick = wk.length ? `<select class="input sm" id="deskWeek" aria-label="Week">${wk.map(w => `<option value="${w.week}" ${st.recWeek === w.week ? 'selected' : ''}>Week of ${fmtDate(w.week)}</option>`).join('')}</select><button class="btn sm" type="button" id="deskRefresh">Refresh</button>` : '';
-  if (!m) return head('Reception', 'Teacher and student in-out times, attendance and announcements.', pick)
-    + `<div class="card empty"><h2>No schedule shared yet</h2><p class="muted">The planner shares the week from the Weekly schedule page. It appears here after that.</p></div>`;
-  const views = [['reception', 'In-out and attendance'], ['announce', 'Announcements']];
-  return head('Reception', `Week of ${fmtShort(m.week)} – ${fmtShort(E.addDays(m.week, 5))}. Shared by the planner ${m.at ? new Date(m.at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}.`, pick)
-    + `<div class="tabs" role="tablist">${views.map(([k, l]) => `<button type="button" role="tab" aria-selected="${st.deskView === k}" class="${st.deskView === k ? 'on' : ''}" data-desk="${k}">${l}</button>`).join('')}</div>`
-    + (st.deskView === 'announce' ? vAnnounce(m) : vReception(m));
 }
 function vDash() {
   const w = weekStats(), t = w.tot, cov = st.result.coverage || { active: 0, done: 0, byClass: {}, round: 1, roundDone: 0, reachable: 0 };
@@ -792,7 +705,7 @@ function vDash() {
     ${Object.entries(cov.byClass).sort((a, b) => nat(a[0], b[0])).map(([c, x]) => `<tr><td><b>${esc(c)}</b></td><td class="num">${x.active}</td><td class="num">${x.done}</td><td class="num">${x.active - x.done}</td><td>${bar(x.done, x.active)} <span class="muted">${pct(x.done, x.active)}</span></td></tr>`).join('')}
     <tr><td><b>All</b></td><td class="num"><b>${cov.active}</b></td><td class="num"><b>${cov.done}</b></td><td class="num"><b>${cov.active - cov.done}</b></td><td>${bar(cov.done, cov.active)} <span class="muted">${pct(cov.done, cov.active)}</span></td></tr></tbody></table></div>
   <h2 class="gh">Saved weekly records</h2>
-  <p class="muted">When the week is over, save it to the records. Students marked present, or not marked, count as counselled, so next week books the students still waiting. Absent students stay in the queue. ${cloud.role ? 'Records are kept in the shared database.' : 'Records are kept in this browser; export them to keep a copy in Drive.'}</p>
+  <p class="muted">When the week is over, save it to the records. Students marked present, or not marked, count as counselled, so next week books the students still waiting. Absent students stay in the queue. Records are kept on this computer, in this browser; export them regularly to keep a copy.</p>
   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"><button class="btn primary" type="button" id="saveWeek">Save this week to records</button><button class="btn" type="button" id="expRec" ${saved.length ? '' : 'disabled'}>Export records (Excel)</button></div>
   ${saved.length ? `<div class="tbl" style="max-width:560px"><table><thead><tr><th>Week of</th><th class="num">Students counselled</th><th class="num">Parent came</th></tr></thead><tbody>${saved.map(([wk, l]) => `<tr><td>${fmtDate(wk)}${wk === st.settings.weekStart ? ' <span class="badge">this week</span>' : ''}</td><td class="num">${l.length}</td><td class="num">${l.filter(x => x.parent).length}</td></tr>`).join('')}</tbody></table></div>` : '<div class="notice i">No weeks saved yet.</div>'}`;
 }
@@ -964,7 +877,7 @@ function bind() {
   on('impSet', 'change', e => { const f = e.target.files[0]; if (!f) return; f.text().then(t => { const s = JSON.parse(t); if (!s.cabins || !s.shifts) throw new Error('This is not a Counselling Planner settings file.'); localStorage.setItem(KEY, JSON.stringify(s)); st.settings = loadSettings(); changed(); toast('Settings imported'); T('import_settings', { ok: true }); }).catch(x => alert(x.message)); });
   on('resetSet', 'click', () => { if (!confirm('Reset cabins, periods, rules, teachers and batch buildings to the defaults?')) return; const w = st.settings.weekStart; st.settings = E.defaultSettings(MASTER); st.settings.weekStart = w; changed(); });
   // schedule
-  all('[data-view]', b => b.onclick = async () => { st.view = b.dataset.view; if (cloud.role && ['reception', 'dash'].includes(st.view)) await loadAtt(); render(); });
+  all('[data-view]', b => b.onclick = () => { st.view = b.dataset.view; render(); });
   all('[data-pid]', b => b.onclick = () => openEdit(b.dataset.pid));
   on('addSlot', 'click', () => openEdit(null));
   on('dl', 'click', downloadExcel);
@@ -973,12 +886,6 @@ function bind() {
   on('impRec', 'change', e => e.target.files[0] && importRecords(e.target.files[0]).catch(x => alert(x.message)));
   // reception desk: teacher in-out and student attendance, saved per week without redrawing the page
   all('[data-recday]', b => b.onclick = () => { st.recDay = b.dataset.recday; render(); });
-  all('[data-desk]', b => b.onclick = () => { st.deskView = b.dataset.desk; render(); });
-  on('signOut', 'click', () => { if (!confirm('Sign out on this computer?')) return; try { localStorage.removeItem(PINKEY); } catch (e) {} location.reload(); });
-  on('deskWeek', 'change', async e => { st.recWeek = e.target.value; await loadAtt(); render(); });
-  on('deskRefresh', 'click', async () => { try { cloud.weeks = (await api('weeks')).weeks || []; } catch (e) {} await loadAtt(); render(); toast('Up to date'); });
-  on('attRefresh', 'click', async () => { await loadAtt(); render(); toast('Up to date'); });
-  on('copyRec', 'click', async () => { const l = localRecs(); if (!confirm(`Copy ${l.length} records saved in this browser to the shared database?`)) return; await addRecords(l); toast(`${l.length} records copied`); });
   // reception desk: each change is saved on its own, without redrawing the page
   const slotOf = k => { const m = recModel(); return m && m.slots.find(x => x.key === k); };
   all('[data-as]', el => el.onchange = () => {
@@ -997,11 +904,7 @@ function bind() {
     if (un && !confirm(`${un} students are not marked present or absent. Count them as counselled?`)) return;
     if (dbRecs().some(x => x.week === wk) && !confirm(`The week of ${fmtDate(wk)} is already saved. Replace it with the current attendance?`)) return;
     const list = rows.filter(r => aStu(r.s.roll).att !== 'Absent').map(r => ({ roll: r.s.roll, name: r.s.name, batch: r.s.batch, date: r.p.date, week: wk, time: r.time, by: r.p.t, parent: !!aStu(r.s.roll).parent }));
-    try {
-      if (cloud.role === 'planner') { busy(true, 'Saving to the database…'); await api('saveWeek', { week: wk, list }); await loadRecs(); }
-      else { st.db.weeks[wk] = list; await saveDb(); }
-    } catch (e) { busy(false); return alert('The week could not be saved: ' + e.message); }
-    busy(false); render(); toast(`${list.length} students saved to the records`); T('save_week', { ok: true, students: list.length });
+    st.db.weeks[wk] = list; await saveDb(); render(); toast(`${list.length} students saved to the records`); T('save_week', { ok: true, students: list.length });
   });
   on('sSearch', 'input', e => { st.search = e.target.value; const pos = e.target.selectionStart; render(); const i = $('sSearch'); i.focus(); i.setSelectionRange(pos, pos); });
   all('[data-excl]', b => b.onclick = () => { st.excluded.add(b.dataset.excl); assign(); persistEdits(); render(); toast('Seat given to the next student in line'); });
@@ -1168,14 +1071,7 @@ $('themeBtn').onclick = () => { const cur = document.documentElement.getAttribut
   const t = await idb.get('tt'); if (t) { st.tt = t.tt; st.ttName = t.name; }
   const r = await idb.get('rec'); if (r) { st.records = r.recs; st.recMeta = r.meta; st.recName = r.name; rebuildStudents(); }
   restoreEdits(); if (st.plan) st.step = 1;
-  cloud.configured = await cloudStatus();
-  if (cloud.configured) {
-    let pin = ''; try { pin = localStorage.getItem(PINKEY) || ''; } catch (e) {}
-    if (pin) { cloud.pin = pin; try { cloud.role = (await api('whoami')).role; } catch (e) { cloud.pin = ''; } }
-    if (cloud.role) await afterSignIn(); else { render(); signIn(); }
-    return;
-  }
-  await loadAtt(); render();
+  await loadAtt(); render(); window.__plannerReady = true;
 })();
 </script>
 </body>

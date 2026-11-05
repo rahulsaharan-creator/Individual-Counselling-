@@ -1,9 +1,0 @@
-{
-  "name": "counselling-planner",
-  "private": true,
-  "description": "Counselling Planner: static page in index.html, database API in api/db.js",
-  "engines": { "node": ">=18" },
-  "dependencies": {
-    "pg": "8.13.1"
-  }
-}
