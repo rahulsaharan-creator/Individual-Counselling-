@@ -312,7 +312,8 @@
   }
 
   /* Step 3+4: match students */
-  function assignStudents(plan, tt, settings, students) {
+  // keep: { slotId: [[roll, basis], ...] } – students already booked; they stay in their slot and only empty seats are filled
+  function assignStudents(plan, tt, settings, students, keep) {
     const ctx = makeCtx(tt, settings);
     const groups = settings.classGroups.split('|').map(g => g.split(',').map(S).filter(Boolean));
     const groupOf = cls => { const i = groups.findIndex(g => g.includes(cls)); return i < 0 ? 'cls:' + cls : 'g' + i; };
@@ -383,6 +384,10 @@
       return [];
     };
     const rules = (settings.rules && settings.rules.length ? settings.rules : defaultRules()).filter(r => r.on);
+    if (keep) for (const p of plan) for (const [roll, basis] of (keep[p.id] || [])) {
+      const s = students.get(roll); if (!s || used.has(roll) || (count.get(p.id) || 0) >= p.k) continue;
+      used.add(roll); count.set(p.id, (count.get(p.id) || 0) + 1); assign.push({ pid: p.id, s, basis: basis || 'Kept' });
+    }
     for (const r of rules) for (const p of plan) if (tMatch(r, p.t)) fill(p, pool(r, p.t), r.name || 'Rule');
     // optional second pass: seats still empty go to the students counselled longest ago
     if (roundOn && settings.roundTopUp) { roundGate = false; for (const r of rules) for (const p of plan) if (tMatch(r, p.t)) fill(p, pool(r, p.t), (r.name || 'Rule') + ' (empty seat)'); }
