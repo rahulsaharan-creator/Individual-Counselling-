@@ -144,7 +144,8 @@
     for (const rec of records) {
       let s = st.get(rec.roll);
       const d = rec.date;
-      if (!s) { s = { roll: rec.roll, name: rec.name, batch: rec.batch, course: rec.course, seen: d, hist: new Map() }; st.set(rec.roll, s); }
+      if (!s) { s = { roll: rec.roll, name: rec.name, batch: rec.batch, course: rec.course, cls: rec.cls || '', seen: d, hist: new Map() }; st.set(rec.roll, s); }
+      else if (rec.cls && !s.cls) s.cls = rec.cls;
       else if (d && (!s.seen || d >= s.seen)) { s.seen = d; s.batch = rec.batch; s.name = rec.name || s.name; s.course = rec.course || s.course; }
       if (d && rec.by && (!cut || d < cut)) s.hist.set(iso(d), rec.by);
     }
@@ -159,6 +160,170 @@
       delete s.hist;
     }
     return st;
+  }
+
+  /* ---------- student data template: the only accepted student file ---------- */
+  // Students: one row per student now studying.  History: one row per counselling already held.
+  const TEMPLATE = {
+    students: { sheet: 'Students', cols: ['Roll No', 'Student Name', 'Batch', 'Class', 'Status', 'Course'], required: ['Roll No', 'Student Name', 'Batch', 'Class'] },
+    history: { sheet: 'Counselling History', cols: ['Roll No', 'Date', 'Counsellor Code', 'Result'], required: ['Roll No', 'Date', 'Counsellor Code'] },
+    classes: ['11th', '12th', 'Target'], status: ['Active', 'Left'], results: ['Done', 'Absent']
+  };
+  const normH = v => S(v).toLowerCase().replace(/[^a-z]/g, '');
+  const normRoll = v => { if (typeof v === 'number') return Number.isInteger(v) ? String(v) : ''; const x = S(v).replace(/\s+/g, '').replace(/\.0+$/, ''); return /^\d+$/.test(x) ? x : ''; };
+  const normBatch = v => S(v).toUpperCase().replace(/\s+/g, '');
+  const normClass = v => { const x = S(v).toLowerCase().replace(/[^a-z0-9]/g, ''); return ['11', '11th', 'xi', 'class11'].includes(x) ? '11th' : ['12', '12th', 'xii', 'class12'].includes(x) ? '12th' : ['target', 'tgt', 'dropper', '13'].includes(x) ? 'Target' : ''; };
+  const normStatus = v => { const x = S(v).toLowerCase(); return !x || ['active', 'studying', 'yes'].includes(x) ? 'Active' : ['left', 'inactive', 'dropped', 'drop', 'no', 'transferred'].includes(x) ? 'Left' : ''; };
+  const normResult = v => { const x = S(v).toLowerCase(); return !x || ['done', 'yes', 'present', 'p', 'held', 'completed'].includes(x) ? 'Done' : ['absent', 'a', 'no', 'not done', 'missed', 'cancelled'].includes(x) ? 'Absent' : ''; };
+  // a calendar day from an Excel cell, the same in every time zone; null when it is not a real date
+  function dayOf(v) {
+    if (v instanceof Date) { if (isNaN(v)) return null; const d = new Date(v.getTime() + 12 * 3600000); return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())); }
+    if (typeof v === 'number') return excelDate(v);
+    const s = S(v); let m, y, mo, da;
+    if ((m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s))) [y, mo, da] = [+m[1], +m[2], +m[3]];
+    else if ((m = /^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2}|\d{4})$/.exec(s))) [da, mo, y] = [+m[1], +m[2], +m[3] < 100 ? 2000 + (+m[3]) : +m[3]];
+    else if ((m = /^(\d{1,2})[\s\-]([A-Za-z]{3})[a-z]*[\s\-,]+(\d{4})$/.exec(s)) && MONTHS[m[2].toLowerCase()] !== undefined) [da, mo, y] = [+m[1], MONTHS[m[2].toLowerCase()] + 1, +m[3]];
+    else return null;
+    const d = new Date(Date.UTC(y, mo - 1, da));
+    return d.getUTCMonth() === mo - 1 && d.getUTCDate() === da ? d : null;
+  }
+  // sheets: [{name, rows}]. Returns { ok, fatal } or { ok, records, issues, stats, used }.
+  // issues: { level: 'error' (row not used) | 'warn' (used, but check it) | 'info', sheet, row (Excel row number), msg }
+  function readTemplate(sheets, teacherCodes, weekStart) {
+    const find = n => sheets.find(s => S(s.name).toLowerCase() === n.toLowerCase());
+    const fail = msg => ({ ok: false, fatal: msg + ' Download the template from Set up, copy your data into it and upload it again.' });
+    const sSh = find(TEMPLATE.students.sheet), hSh = find(TEMPLATE.history.sheet);
+    if (!sSh) return fail('This file is not in the student template: it has no sheet named "Students".');
+    if (!hSh) return fail('This file is not in the student template: it has no sheet named "Counselling History". Keep the sheet even when it is empty.');
+    const colsOf = (sh, spec) => {
+      const h = (sh.rows[0] || []).map(normH), ix = {};
+      for (const c of spec.cols) ix[c] = h.indexOf(normH(c));
+      const miss = spec.required.filter(c => ix[c] < 0);
+      return { ix, miss };
+    };
+    const sc = colsOf(sSh, TEMPLATE.students), hc = colsOf(hSh, TEMPLATE.history);
+    if (sc.miss.length) return fail(`The "Students" sheet is missing the column${sc.miss.length > 1 ? 's' : ''} ${sc.miss.map(c => `"${c}"`).join(', ')} in row 1.`);
+    if (hc.miss.length) return fail(`The "Counselling History" sheet is missing the column${hc.miss.length > 1 ? 's' : ''} ${hc.miss.map(c => `"${c}"`).join(', ')} in row 1.`);
+    const issues = [], add = (level, sheet, row, msg) => issues.push({ level, sheet, row, msg });
+    const codes = new Set(teacherCodes || []);
+    const get = (row, ix, c) => ix[c] >= 0 ? row[ix[c]] : null;
+    // Students
+    const roster = new Map(); let left = 0; const clsByBatch = {};
+    for (let r = 1; r < sSh.rows.length; r++) {
+      const row = sSh.rows[r] || [], X = r + 1;
+      if (!row.some(v => S(v))) continue;
+      const rawRoll = get(row, sc.ix, 'Roll No'), roll = normRoll(rawRoll), name = S(get(row, sc.ix, 'Student Name')).replace(/\s+/g, ' ');
+      const batch = normBatch(get(row, sc.ix, 'Batch')), cls = normClass(get(row, sc.ix, 'Class')), status = normStatus(get(row, sc.ix, 'Status')), course = S(get(row, sc.ix, 'Course'));
+      if (!roll) { add('error', 'Students', X, S(rawRoll) ? `Roll No "${S(rawRoll)}" is not a number.` : 'Roll No is empty.'); continue; }
+      if (!name) { add('error', 'Students', X, `Student Name is empty for roll ${roll}.`); continue; }
+      if (!batch) { add('error', 'Students', X, `Batch is empty for roll ${roll}.`); continue; }
+      if (!cls) { add('error', 'Students', X, `Class "${S(get(row, sc.ix, 'Class'))}" for roll ${roll} is not 11th, 12th or Target.`); continue; }
+      if (!status) { add('error', 'Students', X, `Status "${S(get(row, sc.ix, 'Status'))}" for roll ${roll} is not Active or Left.`); continue; }
+      if (roster.has(roll)) { const o = roster.get(roll); add('error', 'Students', X, `Roll ${roll} is already on row ${o.row}${o.batch !== batch ? ` (batch ${o.batch}; here ${batch})` : ''}. Each student must appear once; this row was not used.`); continue; }
+      roster.set(roll, { roll, name, batch, cls, course, status, row: X });
+      if (status === 'Left') { left++; continue; }
+      (clsByBatch[batch] = clsByBatch[batch] || {})[cls] = (clsByBatch[batch][cls] || 0) + 1;
+    }
+    for (const [b, m] of Object.entries(clsByBatch)) if (Object.keys(m).length > 1) add('warn', 'Students', null, `Batch ${b} has students of more than one class (${Object.entries(m).map(([c, n]) => `${n} ${c}`).join(', ')}). The batch is treated as ${Object.entries(m).sort((a, b2) => b2[1] - a[1])[0][0]}.`);
+    // History
+    const seen = new Map(); let used = 0, absent = 0, later = 0, dupes = 0; const unknown = {};
+    const recs = [];
+    for (let r = 1; r < hSh.rows.length; r++) {
+      const row = hSh.rows[r] || [], X = r + 1;
+      if (!row.some(v => S(v))) continue;
+      const rawRoll = get(row, hc.ix, 'Roll No'), roll = normRoll(rawRoll), rawDate = get(row, hc.ix, 'Date'), d = dayOf(rawDate);
+      const by = S(get(row, hc.ix, 'Counsellor Code')).toUpperCase(), result = normResult(get(row, hc.ix, 'Result'));
+      if (!roll) { add('error', 'Counselling History', X, S(rawRoll) ? `Roll No "${S(rawRoll)}" is not a number.` : 'Roll No is empty.'); continue; }
+      if (!d) { add('error', 'Counselling History', X, S(rawDate) ? `Date "${S(rawDate)}" for roll ${roll} is not a real date. Use dd-mm-yyyy.` : `Date is empty for roll ${roll}.`); continue; }
+      if (!by) { add('error', 'Counselling History', X, `Counsellor Code is empty for roll ${roll}.`); continue; }
+      if (!result) { add('error', 'Counselling History', X, `Result "${S(get(row, hc.ix, 'Result'))}" for roll ${roll} is not Done or Absent.`); continue; }
+      const st = roster.get(roll);
+      if (!st) { add('warn', 'Counselling History', X, `Roll ${roll} is not on the Students sheet; this row was not used.`); continue; }
+      if (st.status === 'Left') continue;
+      if (result === 'Absent') { absent++; continue; }
+      const day = iso(d);
+      if (weekStart && day >= weekStart) later++; // kept: buildStudents counts it once the week moves past it
+      const k = roll + '|' + day;
+      if (seen.has(k)) { dupes++; if (seen.get(k) !== by) add('warn', 'Counselling History', X, `Roll ${roll} has two counsellings on ${day} (${seen.get(k)} and ${by}); counted once.`); continue; }
+      seen.set(k, by);
+      if (codes.size && !codes.has(by)) unknown[by] = (unknown[by] || 0) + 1;
+      recs.push({ roll, name: st.name, batch: st.batch, course: st.course, cls: st.cls, date: d, by }); used++;
+    }
+    for (const [c, n] of Object.entries(unknown)) add('warn', 'Counselling History', null, `Counsellor code ${c} (${n} row${n > 1 ? 's' : ''}) is not in the teacher list. These counsellings still count, but "met this teacher" cannot be checked for ${c}. Use the short code from the timetable, or add ${c} to the teacher list.`);
+    if (absent) add('info', 'Counselling History', null, `${absent} row${absent > 1 ? 's are' : ' is'} marked Absent and not counted as counselled.`);
+    if (later) add('info', 'Counselling History', null, `${later} row${later > 1 ? 's are' : ' is'} dated on or after the week start; they count from a later week.`);
+    if (dupes) add('info', 'Counselling History', null, `${dupes} repeated row${dupes > 1 ? 's' : ''} (same student, same day) counted once.`);
+    if (left) add('info', 'Students', null, `${left} student${left > 1 ? 's are' : ' is'} marked Left and will not be booked.`);
+    // every active student gets a row, so students with no history are included
+    const active = [...roster.values()].filter(s => s.status === 'Active');
+    const records = active.map(s => ({ roll: s.roll, name: s.name, batch: s.batch, course: s.course, cls: s.cls, date: null, by: '' })).concat(recs);
+    const stats = { students: active.length, left, history: used, absent, later, dupes, errors: issues.filter(i => i.level === 'error').length, warnings: issues.filter(i => i.level === 'warn').length };
+    if (!active.length) return { ok: false, fatal: 'No usable student rows were found on the "Students" sheet.', issues, stats };
+    return { ok: true, records, issues, stats, used: [{ sheet: 'Students', rows: active.length, counsellorColumn: '-' }, { sheet: 'Counselling History', rows: used, counsellorColumn: 'Counsellor Code' }] };
+  }
+
+  // Writes the student template into an ExcelJS workbook. data: { teachers: {code: {name}}, students: [[roll, name, batch, class, status, course]], history: [[roll, Date, code, result]] }
+  function fillTemplate(wb, data) {
+    const NAVY = 'FF1F3864', solid = argb => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
+    const head = (ws, cols, widths, notes) => {
+      const r = ws.getRow(1); cols.forEach((c, i) => { const x = r.getCell(i + 1); x.value = c; x.font = { name: 'Arial', bold: true, color: { argb: 'FFFFFFFF' } }; x.fill = solid(TEMPLATE.students.required.concat(TEMPLATE.history.required).includes(c) ? NAVY : 'FF2F5597'); x.alignment = { vertical: 'middle' }; if (notes[i]) x.note = notes[i]; });
+      r.height = 22; widths.forEach((w, i) => ws.getColumn(i + 1).width = w);
+    };
+    const how = wb.addWorksheet('How to fill');
+    const lines = [
+      ['Counselling Planner: student data template', 'title'],
+      ['Upload this file on the Set up page. The planner accepts student data only in this format.', ''],
+      ['', ''],
+      ['Sheet "Students": one row per student', 'h'],
+      ['Roll No (required): digits only, for example 51103618. Each roll number once.', ''],
+      ['Student Name (required).', ''],
+      ['Batch (required): written exactly as in the faculty timetable, for example XA1. Spaces are removed and letters made capital.', ''],
+      ['Class (required): 11th, 12th or Target. Students meet only teachers of their own class group.', ''],
+      ['Status: Active or Left. Empty means Active. Keep students who left and mark them Left, so their history is kept but they are not booked.', ''],
+      ['Course: optional, for example Momentum.', ''],
+      ['When a student changes batch, change the Batch on their one row. Do not add a second row.', ''],
+      ['', ''],
+      ['Sheet "Counselling History": one row per counselling already held', 'h'],
+      ['Roll No (required): must also be on the Students sheet.', ''],
+      ['Date (required): the day of the counselling, as a date (dd-mm-yyyy).', ''],
+      ['Counsellor Code (required): the teacher short code used in the timetable, for example ARV. Not the employee code.', ''],
+      ['Result: Done or Absent. Empty means Done. Only Done counts as counselled; Absent students stay due.', ''],
+      ['Only counsellings that already happened. Do not add planned bookings for future dates.', ''],
+      ['', ''],
+      ['What the planner does with problems', 'h'],
+      ['A row with an error (empty roll, bad date, unknown class, roll repeated) is not used. The upload shows each one with its row number.', ''],
+      ['Warnings (an unknown counsellor code, a history roll not on the Students sheet, a batch with two classes) are shown but do not stop the upload.', ''],
+      ['The same student on the same day twice is counted once. Rows dated on or after the planned week are not counted yet.', ''],
+      ['Do not rename the sheets or the column headings in row 1. Extra columns are ignored.', '']
+    ];
+    lines.forEach(([t, k], i) => { const c = how.getCell(i + 1, 1); c.value = t; c.font = { name: 'Arial', size: k === 'title' ? 14 : 10, bold: !!k, color: { argb: k ? NAVY : 'FF000000' } }; c.alignment = { wrapText: true, vertical: 'top' }; });
+    how.getColumn(1).width = 110;
+    const sw = wb.addWorksheet('Students', { views: [{ state: 'frozen', ySplit: 1 }] });
+    head(sw, TEMPLATE.students.cols, [14, 30, 10, 10, 10, 16], ['Digits only. Once per student.', '', 'As written in the timetable, e.g. XA1', '11th, 12th or Target', 'Active or Left (empty = Active)', 'Optional']);
+    sw.getColumn(1).numFmt = '0';
+    (data.students || []).forEach((r, i) => { sw.getRow(i + 2).values = r; });
+    const hw = wb.addWorksheet('Counselling History', { views: [{ state: 'frozen', ySplit: 1 }] });
+    head(hw, TEMPLATE.history.cols, [14, 14, 16, 10], ['Must be on the Students sheet', 'dd-mm-yyyy', 'Teacher short code from the timetable', 'Done or Absent (empty = Done)']);
+    hw.getColumn(1).numFmt = '0'; hw.getColumn(2).numFmt = 'dd-mm-yyyy';
+    (data.history || []).forEach((r, i) => { hw.getRow(i + 2).values = r; });
+    const lw = wb.addWorksheet('Lists');
+    lw.getRow(1).values = ['Class', 'Status', 'Result', 'Counsellor Code', 'Teacher name']; lw.getRow(1).font = { bold: true };
+    const tc = Object.entries(data.teachers || {}).sort((a, b) => a[0] < b[0] ? -1 : 1);
+    TEMPLATE.classes.forEach((v, i) => lw.getCell(i + 2, 1).value = v);
+    TEMPLATE.status.forEach((v, i) => lw.getCell(i + 2, 2).value = v);
+    TEMPLATE.results.forEach((v, i) => lw.getCell(i + 2, 3).value = v);
+    tc.forEach(([c, t], i) => { lw.getCell(i + 2, 4).value = c; lw.getCell(i + 2, 5).value = (t && t.name) || ''; });
+    [10, 10, 10, 16, 28].forEach((w, i) => lw.getColumn(i + 1).width = w);
+    const nS = Math.max(20000, (data.students || []).length + 5000), nH = Math.max(50000, (data.history || []).length + 20000);
+    const list = (ws, ref, f, title) => ws.dataValidations.add(ref, { type: 'list', allowBlank: true, formulae: [f], showErrorMessage: true, errorStyle: 'error', errorTitle: title, error: `Choose ${title} from the list.` });
+    list(sw, `D2:D${nS}`, '"11th,12th,Target"', 'a class');
+    list(sw, `E2:E${nS}`, '"Active,Left"', 'a status');
+    list(hw, `D2:D${nH}`, '"Done,Absent"', 'a result');
+    if (tc.length) hw.dataValidations.add(`C2:C${nH}`, { type: 'list', allowBlank: true, formulae: [`Lists!$D$2:$D$${tc.length + 1}`], showErrorMessage: true, errorStyle: 'warning', errorTitle: 'Unknown code', error: 'This code is not in the teacher list. Use the short code from the timetable.' });
+    hw.dataValidations.add(`B2:B${nH}`, { type: 'date', operator: 'greaterThan', allowBlank: true, formulae: [new Date(Date.UTC(2020, 0, 1))], showErrorMessage: true, errorTitle: 'Not a date', error: 'Enter the date as dd-mm-yyyy.' });
+    sw.dataValidations.add(`A2:A${nS}`, { type: 'whole', operator: 'greaterThan', allowBlank: true, formulae: [0], showErrorMessage: true, errorTitle: 'Roll No', error: 'Roll No must be a number.' });
+    hw.dataValidations.add(`A2:A${nH}`, { type: 'whole', operator: 'greaterThan', allowBlank: true, formulae: [0], showErrorMessage: true, errorTitle: 'Roll No', error: 'Roll No must be a number.' });
+    return wb;
   }
 
   /* ---------- core rules ---------- */
@@ -324,6 +489,8 @@
       (votes[e.room] = votes[e.room] || {})[c] = (votes[e.room][c] || 0) + 1;
     }
     const batchCls = {}; for (const b in votes) batchCls[b] = Object.entries(votes[b]).sort((a, b2) => b2[1] - a[1])[0][0];
+    const own = {}; for (const s of students.values()) if (s.cls) (own[s.batch] = own[s.batch] || {})[s.cls] = (own[s.batch][s.cls] || 0) + 1;
+    for (const b in own) batchCls[b] = Object.entries(own[b]).sort((a, b2) => b2[1] - a[1])[0][0];
     const byBatch = new Map(); for (const s of students.values()) { if (!byBatch.has(s.batch)) byBatch.set(s.batch, []); byBatch.get(s.batch).push(s); }
     for (const arr of byBatch.values()) arr.sort((a, b) => (a.last || '') < (b.last || '') ? -1 : (a.last || '') > (b.last || '') ? 1 : (a.roll < b.roll ? -1 : 1));
     const classShifts = new Map();
@@ -477,7 +644,7 @@
   };
   // level: ok | warn | fail
   function buildLog(o) {
-    const { tt, settings, recMeta, students, plan, planWarnings, moves, result } = o; const L = [];
+    const { tt, settings, recMeta, recIssues, students, plan, planWarnings, moves, result } = o; const L = [];
     const add = (step, level, text, detail) => L.push({ step, level, text, detail: detail || [] });
     const pl = (n, w) => `${n} ${w}${n === 1 ? '' : /ch$/.test(w) ? 'es' : 's'}`;
     const kw = S(settings.keyword).toLowerCase();
@@ -495,7 +662,9 @@
     if (!students) add('Student file', 'fail', 'No student file is loaded.');
     else {
       const withH = [...students.values()].filter(s => s.times > 0).length;
-      add('Student file', students.size ? 'ok' : 'fail', `${pl(students.size, 'student')} found; ${withH} have counselling history before this week.`, (recMeta || []).map(m => `Sheet "${m.sheet}": ${m.rows} rows, counsellor column: ${m.counsellorColumn}`));
+      add('Student file', students.size ? 'ok' : 'fail', `${pl(students.size, 'student')} found; ${withH} have counselling history before this week.`, (recMeta || []).map(m => `Sheet "${m.sheet}": ${m.rows} rows used`));
+      const ri = recIssues || [], nE = ri.filter(i => i.level === 'error').length, nW = ri.filter(i => i.level === 'warn').length;
+      if (ri.length) add('Student file checks', nE ? 'fail' : nW ? 'warn' : 'ok', `${pl(nE, 'row')} not used because of an error, ${pl(nW, 'warning')}.`, ri.slice(0, 200).map(i => `${i.level === 'error' ? 'Error' : i.level === 'warn' ? 'Check' : 'Note'}: ${i.sheet}${i.row ? ' row ' + i.row : ''}: ${i.msg}`).concat(ri.length > 200 ? [`… and ${ri.length - 200} more. Download the checks from Set up.`] : []));
     }
     if (!result) { add('Matching', 'fail', 'The schedule has not been calculated yet.'); return L; }
     // 3 batches: student batch codes must match timetable room codes
@@ -533,6 +702,6 @@
   }
   const logText = L => L.map(l => `[${l.level.toUpperCase()}] ${l.step}: ${l.text}` + l.detail.map(d => '\n    - ' + d).join('')).join('\n');
 
-  const api = { DAYS, SLOTS, COUNSEL_SHIFTS, activeShifts, defaultRules, defaultSettings, parseTimetable, parseStudents, buildStudents, buildPlan, finalizePlan, validatePlan, assignStudents, workload, makeCtx, hm, addDays, buildLog, logText };
+  const api = { DAYS, SLOTS, COUNSEL_SHIFTS, activeShifts, defaultRules, defaultSettings, parseTimetable, parseStudents, buildStudents, buildPlan, finalizePlan, validatePlan, assignStudents, workload, makeCtx, hm, addDays, buildLog, logText, readTemplate, fillTemplate, TEMPLATE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.MCSEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);

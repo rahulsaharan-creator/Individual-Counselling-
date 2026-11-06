@@ -29,7 +29,12 @@ How students are matched:
 - Each cabin has a building. When a cabin is in PC, teachers with a class at PC campus just before or after counselling get a PC cabin, with students whose class is at PC.
 - Students only meet a teacher of their class: 11th with 11th and FTP (new) teachers, 12th with 12th, Target with Target. A teacher with no class set and no classes in the timetable is treated as FTP.
 - Senior faculty (12th and Target teachers) are never moved when cabins are full.
-- Every student is counselled once before anyone is booked again. A switch can fill the seats this leaves empty.
+- Students due this round go first (rounds are counted per class group), then students who have not met the teacher, then the higher rule, then the student counselled longest ago. Seats stay empty only when no free student of that class group is left. The **Why · log** tab shows the reason for every empty seat.
+
+Student file: only the student template is accepted (**Set up → Download student template**).
+- **Students** sheet, one row per student: Roll No, Student Name, Batch (as in the timetable), Class (11th, 12th or Target), Status (Active or Left), Course.
+- **Counselling History** sheet, one row per counselling already held: Roll No, Date, Counsellor Code (timetable short code), Result (Done or Absent).
+- Every upload is checked row by row. Rows with errors are not used and are listed with their row numbers; warnings are listed but do not stop the upload.
 
 Settings, the last schedule, attendance and the counselling records are saved only on this computer, in this browser. Nothing is sent to a server. Do reception and planning in the same browser on the same computer, and export the records from the Dashboard every week to keep a copy. Use **Rules and lists → Export settings** to copy them to another computer.
 
