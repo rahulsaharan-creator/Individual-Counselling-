@@ -284,6 +284,34 @@ details.fold>summary .muted{font-weight:500;font-size:14px}
 .notice{border-radius:12px}
 .notice.i{background:var(--navy-soft)}
 .badge.ok{background:var(--accent-soft);color:var(--accent)}
+/* view switch */
+.roles{display:inline-flex;gap:2px;padding:3px;border:1px solid var(--line);border-radius:999px;background:var(--surface2)}
+.roles button{border:0;background:none;padding:6px 14px;border-radius:999px;font-weight:600;font-size:13.5px;color:var(--muted);cursor:pointer}
+.roles button.on{background:var(--surface);color:var(--accent);box-shadow:var(--sh1)}
+body[data-role="teacher"] .stepper,body[data-role="teacher"] #calcBtn,body[data-role="reception"] .stepper,body[data-role="reception"] #calcBtn{display:none}
+/* set up: progress strip */
+.rstrip{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0;border:1px solid var(--line);border-radius:16px;background:var(--surface);margin:0 0 28px;overflow:hidden;box-shadow:var(--sh1)}
+.rs{display:flex;gap:12px;align-items:center;padding:14px 16px;border-left:1px solid var(--line2);text-decoration:none;color:inherit;cursor:pointer;min-width:0}
+.rs:first-child{border-left:0}
+.rs:hover{background:var(--surface2)}
+.rs i{flex:none;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-style:normal;font-weight:700;font-size:13px;border:1.5px solid var(--line);color:var(--muted)}
+.rs.ok i{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.rs.err i{background:var(--danger-soft);border-color:var(--danger);color:var(--danger)}
+.rs b{display:block;font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rs span{display:block;font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rs.err span{color:var(--danger)}
+/* set up: compact files */
+.files{border:1px solid var(--line);border-radius:16px;background:var(--surface);box-shadow:var(--sh1);overflow:hidden}
+.frow{display:grid;grid-template-columns:40px minmax(0,1fr) minmax(0,1.6fr) auto;gap:16px;align-items:center;padding:14px 18px;border-top:1px solid var(--line2);transition:background .15s}
+.frow:first-child{border-top:0}
+.frow.over{background:var(--accent-soft)}
+.frow .fileic{width:36px;height:36px}
+.frow b{display:block;font-weight:700}
+.frow small{display:block;color:var(--muted);font-size:12.5px}
+.frow .fstat{font-size:13.5px;min-width:0}
+.frow .fstat .fn{display:block;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.frow .fact{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+@media (max-width:900px){.rstrip{grid-template-columns:1fr 1fr}.rs{border-left:0;border-top:1px solid var(--line2)}.frow{grid-template-columns:36px minmax(0,1fr)}.frow .fstat,.frow .fact{grid-column:2}.frow .fact{justify-content:flex-start}}
 .footer{max-width:1440px;margin:0 auto;padding:0 28px 28px;color:var(--muted);font-size:13px;display:flex;gap:8px;align-items:center}
 .footer img{height:18px;opacity:.9}
 .mcs-who{position:fixed;inset:0;z-index:100;display:grid;place-items:center;background:rgba(0,0,0,.2);padding:16px;box-sizing:border-box}
@@ -297,6 +325,7 @@ details.fold>summary .muted{font-weight:500;font-size:14px}
   <div class="bar">
     <div class="logo"><img class="logo-g" src="data:image/png;base64,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" alt="Matrix Academy" width="150" height="26"><img class="logo-w" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAARQAAAAwCAYAAADQOoXtAAAACXBIWXMAABYlAAAWJQFJUiTwAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAA+oSURBVHgB7Z0JsBxVFYbPCwkCgoQ9IMhjX8olCAIim4WEJSggBjEU8IIsgUQIVIzsPrZiDXtCRZQXCEJYSlZFBElEQBZZBEFAIKBRFoHEEJIgIcf/f/fOq36T7pl7unum39Jf1amenrlb93Tfvvfcc06LlJSUlJSUlJSUlJSUlJSUlJSUlJSUNI0WaTCqeiI2m0I+E/n6A8jElpaWf0tJSUlJCOhMhkAWaTxHSElJSZ9igGQAncIWkCsgP4UsG5NkO+k+MomyVUKZO0COg3xBSkpKehWppjy42TmFaYeMgAz0X58POQXTGPVp2FlNhRySUMxsyPpIvyRS7jBspkHWhMyF3AY5G2n+ITmDusZis1tA0smo/37JGdT/fWwOCkh6F+rvkBxAnVtjc5ohy0uo+2RDetZxMTYbSXF8iDYf6tuyMjbXQAZJNniNzhM3VX8H8grkKcjbqOsTMYJ2nYDNzoYsk1DPAz7vSHH3nYV3kf/o0MQcIGAzVMKZDxmHOt4XC+wkIO2QuQnTmBMhe0ImQl6BLNHavAg5HbIbZDjk/Zg0H0JGQLJeFNXHMlXDeAqykuQIylse8mZg/ZdJTqCsa9TGJ5AvGuuYocUyJ9IWTrkXamNYDHkBcizk84ZTxHZ1qI22SN41IK+rnTGBbWtTO+dJGpBxBcgCbT4fQ1olRzS8QyEXSI6gvHMNdefSoaCctTTdf3e1sZ4ZWizN6lCisOPt0MCORTN0KD7/MMh8tcH0u9dp1waQeWrjXo087E06FAxpFmBzlzSfxyC5T3sM/Bgn7ZuSAyhnF5YnzYfD7OXFzlFo85ZSUgtO+9sgHHH/SBoM7sPfYTNRbHwWMgntGxz3ozoVxRSIZTT+GuTA6LQvjVI2d31CAL+J6loKgLqmC3HSMy2zIz8V1JeIbU6fphOornc9bI6SdPAaOVJKQvgc5HJ1OohGcy7kAVsW2QQyIeG3H0K+JeGwEzkG9+WH0S/TdCjvQRZJc/mXFM82kHGSDT69vio2lpXsHA5ZRdJDPcGKUhICHzrUM06QBoIb+X/ilPr/ERsT0LbvRb9Qp6zn1Dr0gcmFl5PjFisSOxRUsjPkBs67/HCI3+2EzbWQ5cQOV23mSTouQd37Svf2fQmyoTSXU1HnVpIC5BsiBUx1/Py2TbKxbA5l9DfOxrn/ijQQv6pyvNhYBjIZbVuLO37UPQmygqGM+8SNtJcitkOhcgabX0EOhnC+9gS+u8h/XlXq8ziEw749xS0BD8TBrwLhMh6H8Bx67QWhdvgJcctytVgDcj3aMBZyGuRp7D8HuQufV5fmsRrkYtSZZhpynbhz0WwOhLRKdriCl+ZB0l9hJ5zbCl0SuKduwuYMscH7qcN3JjQL2M6Ql+Yeh1TMQ+qCSlaCPK92lniN79ZiBHm20fSrA1MkBWpb5anmMGNd+2h6UtugIG8L5A+aH3WnfNo/V3lqsWXMOepQG211zjlXXx9TO1erW/4OhSYc+9Rqy8CY7+h7Y7I9AM9AzkCvdY+kAPn+jIbSyIyGbT+DrGfIPgp5b0cZv5XmcSbqvD/EFwnpqLu4WIqBo8AdJT+OwPFM9vP3JI6BDJH6fEfcylMoHOFNDUiXRXnPlcR9q76jIn1tyK7iDMrWERsHQF6UBsLVV/wvNCB9RNzoI5TRYuM80z2urkefozZ+6W+aXEBZq0JuVRtvabzpf616soxQOo87sJ52zUaWEcqfNH/2kxxAOaPVRrsYUfsIZVad8lrVXWsW7tGq1UHNeYQSKfcgbRzTNWCVs1qHwifP6xLOjZBR6LXmSE6gLJo3cwnrVkM2LteFPBXzZCRO8LdrJcDvXNE5XQpAnfJ4+8DkCyUc2qVk8gHrreDafAObs8QG9YW5WlongfZNx+YXkj9c2R0fojcZUNUg3sy8SZ6W+lyJ9AfXGf6mAmVyNYjeyHcEJOfB7tEIf58ArtIEs3x/09GPpKibb7wh7bESbjhIAz+znqwPcYPYoCLesoKSleMgL0h+0ERkGO6v2SGJl7rYvV6Ay8N/r5GPDbYuV5nwnQod6P5SI9l/IcOR9mEpBnpE/yThN9p+WG1OckGdIduBgcnfgFwPuT0wPVd62qX/0mwbLBPemp0OhJZRZy3o8PtMaOKkpycVW0k6CXpbjgxeNqoCF/s4yCwvK6rTNHfu+99v9/t3+9FPLStNnry/SrGcjLZ2szBU59NRyFTHQ6vYgYFpb/ZWyJy+hio098Yxbi79k92N6Tnqz30UXwv8nzSpyMPmiQrYyZYMSR0KVwfWT/jtat/gtNCXoNULL/pVIvvR39flDup6UtwTNA5q3y1u4I2A55A+ElFLUq5UFRLPxXdmltWTqX77pJdQGu6z0tPAuaWu7hJjtjfFjaSbCu4bGqtdK+lhiAaa1n9sydTVoeBkDVSnFf86dk9JSM+e1uR9GgNHFNd5YXkPRfbJff5zdAh+hST/KYeq074vI8XB+DBcLhU/WtlbimOUOEewEB7BBfMSP/gRZ9DKlYfnfbD0A3Ccq0M4heS1uZnYeBrn9lMpBhq8pdEtcqR6fKjeJErFpJ7DGs653oI8Ks5vJY5fo5J3JRs8wGe98ETPiuyTV/3nriU81MlgNg8mlPcDn5bLg69CivDkJZz68Lxl7XBTo86C1zJymBKz/08JgyOyY6Vv0Rq3XirOX+ZmCV81ixKqm2oEXLCYL3bYL/CBYY5BVBmhUAkbMue+W7LDp/elXngDHBbZJ2P85xOr8tXzcubBM1LYMCkGTt1mQDaW4qDhVah5P5Xu3UJReJ3VTRLOGDXa//QznsM5fUSK4xxI2tATdDw0OzgO8L3QpoHpn5XsLBanKa9oyz+u2q98rlZkPSFhtEr+hEbnD/HI5XDSMrUIwutwjjFkoa8WTfMHR0XckzgUWo32tVFKXvA6t4TbzBX8l8Mlm3c8jdjo4LitJRNHKLwoQp4yHPr9TbJDh6kNvDCWwpjIPhnhP1f7DHA+FzJ8W1Hzd7XnMlxaT+lqbpEwE3IrNGW3DMk5NZoVI78X91+HciTOdzPtLHoLl2N0kseI3gz+D46SuZARutKXBDsVWsIHO4WyQwk1m5+DE9RtDV5dPM21/edl1EWrH+T3aVq9vVdotVdE3KoMb1D6EfDpxouX1oQb43fqQxiSgHPWI6oUrR9J2No6Dz7riayGCmFTsOYEFvpyFkv+WFdd2AkMThBLICkOqYuaZvZUpuBesRgW5gYXV7Chu0ZIVIAQ2DndGNqpsEPhU/+DgLRxNzM7hXP8Z0bVpkJ0oO8heUIrQ76Z4pyuGDKOjlIn+M9cmuacnQ5s7GheFhf1nqESWqq047wJQ7TliwLTWaGy9Y+SjbO8+XauqItTk0ZhmBfj/IXc32HMn9H4j61Od3nC+zFPh1CyvwQasg7AwXNVhYo8On3RfuKthLRJPd4uuJi+LC4AT6XT4WcuPbPDWh11zBR3shknpbIUxdUiDrG7NMlIR5N/WuVxpHJ5VT2DJDl0In2JbvP5NqwOS5cHflmV0zNrhKwK7EgnSWMo2ibkG2L3UO9rUMe3Ha6TVOE08kBd3ONGrXIyuNgm9RJ1rvJwJAC507+7IykeJl/9sHLM93SWoi0JHZNoucqVGxrGcYRCI6ukNwTSNJ3v8ulS6qF86nNogUkHxWodCqdmKyeU1Y62j6BzFCQvk+OlQNnPY5MmAj7bdFiko/tIcsKPBodLsXB0kuubAXohvNYLe7WuuqBoHN03yneMPmt3op7VaiWKq7yWt3GcfQoj0jPmQ8WalfPp53HzUDtMM2WOYOKiqtE0nR3KqZF2MIIbp0A0HR9fla9VknUjWaciFmhk96gti9zImC+RffPLoWrAkWBPUIoO6wPm+Jwuz4yIxcKVHcqVUhy3+TaEwmO1WtJuIW4WEw4uio3UvWckjnMkIyhjQ8h+XgZBtq7s+9939Pt7VOU7JaFN8+v1mgntmKrhDK3Ku6uGvxeFLy9bsyr/UA1neo1jWEfdO4t6CtdIINoL4qFgf7zaYNTCuvoTzT9iW5qYOwxWzVnHvWpnlISg7q1kt9Qo6DXNGAtDux88bR+mV3b87zP87jORPFT0PpnQpk8hN6sPumtoR+oOxec/LzDvyJi8lg4lMYQDfrtQexaL1AXjDjn/vaFD4Q13rdr4QGOul6pyO9RGW42y0gRV4r000OffHPKe2uDD9Gtx7akUyjB37HU4DakV4o5LutQgPyTNhVOnpAji7ODoZ8Gb9PAmWiZyqsaVqy1qpLlXbJanwaiLwxIaooBwfh/0Osoq+J7g/QPT8jqi5XOf0KdQH6fudRi08QkdBVPXdwHyMaxGI8wDulAXpuJCscFI+aMrbaMvF8rhVK3dUAZ9xWifshPyvyMxDRti6J0e0AyGTL6uoV445Vmnsu9/X9fvb+73mSY0lOE7GvgeYs04QvFl7FAjD0NpbpaQL/MIBd8frjYulRSoe4LVe0d1lHchdT2ttReFgMT3e6mdM2u0q0NttMWUsZymm65MiCmLI7GZamcpv7XKKs/b2LwkYTCYtOXJ2A3WBXnWyycM6FTZ97/P9vuV9tByNtTG4uFGLBkngbqonE2K4DUVv78sDUCd/4zFzJ7uDRdJCvz/8KAhC4Mkp74+eiI4Bxxp/lxsnKHOc79RnC3uNTUWeI8t9WoPvzLKGYrVkZAPhQOiX0T1IdMkHOoPGu4Epy62h+XJWoSWnStSG8RIIy0laW+zjSH9PSER+mtg0+w7c/ymxFFtIvw/H7dlkWmNOA8oc0+xX1/sLI5OCtmK7zk6O0nsUMfUFRI02qFQQ79AwqDirUMbaB2pztSXEaNCvWdf9AZ0TYW9O61fY6QhMTDURR4/zpZLgldfEuC0y7KESmfTPaQPgf+Txz9WbNHX6P1+mWZ8J3YUlMXAY9fbc8rpOIZ6DrYMY2IZjRIGneKiSGdf0tWhoDJagEbfH0Pjq6TYJ3SUu6ORSifvN8Snf9y0gTcrI2FFDcRSDel7IbRKtbwO9Q1Ippi7/qlmfZ3H2DxvpJ6AtyU635ar04BzrOSAH+2wM7G8e4cwLnPdKZu3Buc9Z32XODvOTsv26veF0LyewykGQeIQiB3KROlu2s2TepQlcG0W0CZqlBnB7buR9l4lzreAhm90TuMTcZrFSladq35oxLHZeXeeqL81MOniaOQsdWEILY5fC3IIilUZMZpeVVLLb0mdR7jlNbJzUd5cMWI4z5201PG1UuewankRHVkYXQ0xXnuk69itx+OZ599oEYQ6g1Kzx35LiJ+aOm/hl71Wd6bvdJoO6j1JncZ+dlFtKCkpyQHcwNv6G7pQj1Iqo7T/RlsvKSkpKSkpKSkpKSkpKSkpjv8DlMKzsu1Qth8AAAAASUVORK5CYII=" alt="Matrix Academy" width="150" height="26"><span class="sep" aria-hidden="true"></span>
       <div class="brand"><b>Counselling Planner</b><span id="weekLabel">No week loaded</span></div></div>
+    <div class="roles" role="group" aria-label="View as"><button type="button" data-role="admin">Admin</button><button type="button" data-role="reception">Reception</button><button type="button" data-role="teacher">Teacher</button></div>
     <button class="btn ghost icon-btn" id="themeBtn" type="button" aria-label="Switch between light and dark">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
     <button class="btn primary" id="calcBtn" type="button" disabled><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 21v-5h5"/></svg><span class="calc-label" id="calcLabel">Calculate schedule</span></button>
@@ -1729,9 +1758,11 @@ function render() {
     if (i === st.step) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current');
   });
   const y = window.scrollY;
-  const pg = st.step === 0 ? 'Set up' : 'Weekly schedule: ' + st.view;
+  const pg = st.role === 'teacher' ? 'Teacher view' : st.role === 'reception' ? 'Reception view: ' + (st.recView || 'att') : st.step === 0 ? 'Set up' : 'Weekly schedule: ' + st.view;
   if (pg !== window.__plannerPage) { window.__plannerPage = pg; T('page_view', { feature: pg }); }
-  $('main').innerHTML = [viewSetup, viewSchedule][st.step]();
+  document.body.dataset.role = st.role;
+  document.querySelectorAll('.roles [data-role]').forEach(b => { b.classList.toggle('on', b.dataset.role === st.role); b.setAttribute('aria-pressed', b.dataset.role === st.role); });
+  $('main').innerHTML = st.role === 'teacher' ? viewTeacherRole() : st.role === 'reception' ? viewReceptionRole() : [viewSetup, viewSchedule][st.step]();
   bind(); if (st.step === 0) { window.scrollTo(0, y); markToc(); }
 }
 const head = (title, lead, right = '') => `<div class="pagehead"><div><h1>${title}</h1><p class="lead">${lead}</p></div>${right ? `<div style="display:flex;gap:8px;flex-wrap:wrap">${right}</div>` : ''}</div>`;
@@ -1786,6 +1817,54 @@ async function downloadTB(empty) {
     await saveFile(empty ? 'Counselling_Teacher_Batches_Template.xlsx' : `Counselling_Teacher_Batches_${new Date().toISOString().slice(0, 10)}.xlsx`, new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
   } catch (e) { alert('The file could not be made: ' + e.message); }
 }
+/* ---------- three views: Admin (everything), Reception, Teacher ---------- */
+let _role = 'admin'; try { _role = localStorage.getItem('mcs_role') || 'admin'; } catch (e) {}
+st.role = ['admin', 'reception', 'teacher'].includes(_role) ? _role : 'admin';
+try { st.myTeacher = localStorage.getItem('mcs_my_teacher') || ''; } catch (e) {}
+async function pinHash(t) { const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('mcs-admin:' + t)); return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join(''); }
+async function switchRole(r) {
+  if (r === st.role) return;
+  if (r === 'admin' && st.settings.adminPin) {
+    const p = prompt('Admin PIN'); if (p === null) return;
+    if (await pinHash(p) !== st.settings.adminPin) return toast('Wrong PIN');
+  }
+  st.role = r; try { localStorage.setItem('mcs_role', r); } catch (e) {}
+  T('role_switch', { feature: r }); scrollTo(0, 0); render();
+}
+const notReady = (title, lead) => head(title, lead) + '<div class="card empty"><h2>This week’s schedule is not ready yet</h2><p class="muted">The admin calculates the schedule on the Set up page. Come back when it is done.</p></div>';
+function viewReceptionRole() {
+  if (!st.plan || !st.result) return notReady('Reception', 'Attendance and announcements for this week.');
+  const v = st.recView === 'announce' ? 'announce' : 'att', t = weekStats().tot;
+  return head('Reception', 'Mark teachers in and out, and students present or absent. Every change is saved on this computer straight away.',
+    `<button class="btn" type="button" id="dlAnn">${ICON.dl}Announcement sheet</button><button class="btn primary" type="button" id="dlAtt">${ICON.dl}Attendance sheet</button>`)
+  + `<div class="kpis"><div class="kpi"><b>${t.tin}<small style="font-size:18px;color:var(--muted)"> / ${t.slots}</small></b><span>Teachers came this week</span></div><div class="kpi"><b>${t.P}<small style="font-size:18px;color:var(--muted)"> / ${t.booked}</small></b><span>Students present</span></div>
+    <div class="kpi"><b>${t.A}</b><span>Students absent</span></div><div class="kpi"><b>${t.U}</b><span>Not marked yet</span></div></div>
+  <div class="tabs" role="tablist"><button type="button" role="tab" data-recv="att" class="${v === 'att' ? 'on' : ''}" aria-selected="${v === 'att'}">Attendance</button><button type="button" role="tab" data-recv="announce" class="${v === 'announce' ? 'on' : ''}" aria-selected="${v === 'announce'}">Announcements</button></div>
+  ${v === 'att' ? vReception(recModel()) : vAnnounce(recModel())}`;
+}
+function viewTeacherRole() {
+  if (!st.plan || !st.result) return notReady('Teacher remarks', 'Write a short remark for each student you counselled.');
+  const ts = [...new Set(st.plan.map(p => p.t))].sort((a, b) => tName(a).localeCompare(tName(b))), me = ts.includes(st.myTeacher) ? st.myTeacher : '';
+  const pick = `<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><label class="f" for="myT" style="margin:0">Your name</label><select class="input" id="myT" style="min-width:280px"><option value="">Choose your name</option>${ts.map(t => `<option value="${esc(t)}" ${t === me ? 'selected' : ''}>${esc(tName(t))} (${esc(t)})</option>`).join('')}</select></div>`;
+  return head(me ? esc(tName(me)) : 'Teacher remarks', me ? 'Your counselling sessions this week. Write a short remark for each student you counselled; it is saved as soon as you leave the box.' : 'Choose your name to see the students you counsel this week.')
+    + `<div class="card" style="padding:16px 20px;margin-bottom:18px">${pick}</div>` + (me ? vRemarks(me) : '');
+}
+async function downloadSheets(kind) {
+  busy(true, 'Building the sheet…'); await nextFrame();
+  try {
+    const wb = new ExcelJS.Workbook(), x = xl(wb);
+    if (kind === 'announce') sheetAnnounce(x); else { sheetInOut(x); sheetAttendance(x); sheetAbsent(x); }
+    const buf = await wb.xlsx.writeBuffer(); T('download_' + kind, { ok: true });
+    await saveFile(`Counselling_${kind === 'announce' ? 'Announcements' : 'Attendance'}_${st.settings.weekStart}.xlsx`, new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  } catch (e) { alert('The sheet could not be made: ' + e.message); }
+  busy(false);
+}
+function viewPinAdmin() {
+  const on = !!st.settings.adminPin;
+  return `<div class="optline" style="display:block"><b>Admin PIN</b> <span class="muted">${on ? 'Set. Switching to the Admin view asks for it.' : 'Not set: anyone using this computer can switch to the Admin view.'} Reception and teachers use their own views without a PIN.</span>
+    <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap"><button class="btn sm" type="button" id="pinSet">${on ? 'Change admin PIN' : 'Set an admin PIN'}</button>${on ? '<button class="btn ghost danger sm" type="button" id="pinOff">Remove PIN</button>' : ''}</div></div>`;
+}
+
 /* ---------- Logic v2: input checks, Teachers section, batch timetable ---------- */
 let _chk = null, _chkKey = '';
 function inputChecks() {
@@ -1873,8 +1952,6 @@ function viewTeachers() {
       <td><button class="btn ghost icon-btn danger" type="button" data-delt="${esc(c)}" aria-label="Delete ${esc(c)}">${ICON.del}</button></td></tr>`; }).join('');
   return `<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"><input class="input sm" id="tFilter" placeholder="Find a teacher or batch" style="width:220px" aria-label="Find a teacher or batch">
       <button class="btn sm" type="button" id="addT">${ICON.plus}Add teacher</button>
-      <label class="btn sm" style="cursor:pointer">Upload teachers<input type="file" accept=".xlsx" id="impT" class="hide"></label>
-      <button class="btn sm" type="button" id="dlT">${ICON.dl}Download teachers</button>
       ${st.tt ? '<button class="btn sm" type="button" id="fillTaught">Fill empty “Batches taught” from this week’s timetable</button>' : ''}</div>
     <div class="tbl scrollbox" style="max-height:560px"><table id="tTable"><thead><tr><th>Short name</th><th>Full name</th><th>Subject</th><th>Batches taught</th><th>Batches to counsel</th><th>Senior</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
@@ -1969,17 +2046,15 @@ async function downloadTemplate() {
 function viewUpload() {
   const tt = st.tt, rc = st.recMeta, kw = st.settings.keyword.toLowerCase();
   const counsel = tt ? tt.entries.filter(e => (e.room + ' ' + e.subj).toLowerCase().includes(kw)).length : 0;
-  return `<div class="uploads">
-    <label class="drop ${tt ? 'loaded' : ''}" data-drop="tt"><input type="file" accept=".xlsx,.xls" id="ttFile">
-      <span class="fileic">${ICON.file}</span><h3>Faculty timetable</h3>
-      <p>Excel with “Teacher, M1 … E3” for each day, and two rows per teacher: the subject, then the batch or room.</p>
-      <div class="status">${tt ? `<span class="badge ok">Loaded</span> <b>${esc(st.ttName)}</b><br><span class="muted">${tt.teachers.length} teachers · ${counsel} counselling cells${tt.weekStart ? ` · week of ${fmtShort(tt.weekStart)}` : ''}</span>` : '<span class="muted">Choose a file or drop it here</span>'}</div></label>
-    <label class="drop ${rc ? 'loaded' : ''}" data-drop="rec"><input type="file" accept=".xlsx,.xls" id="recFile">
-      <span class="fileic">${ICON.file}</span><h3>Student list</h3>
-      <p>One row per student: Roll No, Student Name, Batch, Shift (Morning or Evening, when the student has classes) and Status, then the counselling history in Round 1 to Round 5 columns (date, teacher, remarks). Upload it once; it stays on this computer.</p>
-      <div class="status">${rc ? `<span class="badge ok">Loaded</span> <b>${esc(st.recName)}</b><br><span class="muted">${st.students ? st.students.size.toLocaleString() : 0} students from ${rc.map(u => esc(u.sheet)).join(', ')}</span>` : '<span class="muted">Choose a file or drop it here</span>'}</div></label>
+  const T_ = st.settings.teachers, nT = Object.keys(T_).length, nC = Object.values(T_).filter(t => (t.counsel || []).length).length;
+  const row = (drop, title, when, stat, acts) => `<div class="frow" data-drop="${drop}"><span class="fileic">${ICON.file}</span><div><b>${title}</b><small>${when}</small></div><div class="fstat">${stat}</div><div class="fact">${acts}</div></div>`;
+  const up = (id, has, accept = '.xlsx,.xls') => `<label class="btn sm ${has ? '' : 'primary'}" style="cursor:pointer">${has ? 'Replace' : 'Upload'}<input type="file" accept="${accept}" id="${id}" class="hide"></label>`;
+  const none = '<span class="muted">Not uploaded yet · drop the file here or click Upload</span>';
+  return `<div class="files">
+    ${row('tt', 'Faculty timetable', 'Every week', tt ? `<span class="fn">${esc(st.ttName)}</span><span class="muted">${tt.teachers.length} teachers · ${counsel} counselling cells${tt.weekStart ? ` · week of ${fmtShort(tt.weekStart)}` : ''}</span>` : none, up('ttFile', !!tt))}
+    ${row('teach', 'Teachers', 'Once; upload again when it changes (replaces the list)', nT ? `<span class="fn">${nT} teachers</span><span class="muted">${nC} with batches to counsel</span>` : none, up('impT', nC > 0, '.xlsx') + `<button class="btn sm ghost" type="button" id="dlT">${ICON.dl}Download</button>`)}
+    ${row('rec', 'Student list', 'Once; upload again when students change', rc ? `<span class="fn">${esc(st.recName)}</span><span class="muted">${st.students ? st.students.size.toLocaleString() : 0} students</span>` : none, up('recFile', !!rc) + `<button class="btn sm ghost" type="button" id="dlTpl">${ICON.dl}Template</button>`)}
   </div>
-  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center"><button class="btn sm" type="button" id="dlTpl">${ICON.dl}Download student list template</button><span class="muted" style="font-size:13.5px">Empty list with the columns, dropdowns and instructions.</span></div>
   ${st.oldRec ? '<div class="notice w" style="margin-top:12px">The student file uploaded before has no Shift column, so it cannot be used any more. Upload the student list in the new format.</div>' : ''}
   ${recChecks()}
   ${tt && tt.warnings.length ? `<div class="notice w" style="margin-top:16px"><b>Timetable notes</b><ul>${tt.warnings.map(w => `<li>${esc(w)}</li>`).join('')}</ul></div>` : ''}
@@ -2071,15 +2146,25 @@ function viewSetup() {
   const nav = [['sec-files', 'Files'], ['sec-slots', 'Counselling slots'], ['sec-checks', 'Checks'], ['sec-teachers', 'Teachers'], ['sec-btt', 'Batch timetable'], ['sec-adv', 'Advanced settings']];
   const nl = locks().length; if (nl && st.tt && st.students) todo.push(`fix ${nl} problem${nl > 1 ? 's' : ''} under Checks`);
   const nT = Object.values(s.teachers).filter(t => (t.counsel || []).length).length;
-  return head('Set up', 'Upload the timetable each week. The student list and the teachers are set once and kept on this computer. The schedule opens when every check passes.')
-  + `<div class="setup"><nav class="toc" aria-label="On this page"><ul>${nav.map(([id, l]) => `<li><a href="#${id}">${l}</a></li>`).join('')}</ul></nav><div class="setup-body">
-    <div class="group" id="sec-files"><h2 class="gh">Files</h2><p class="gd">A new faculty timetable each week. The student list only when it changes.</p>${viewUpload()}</div>
-    <div class="group" id="sec-slots"><h2 class="gh">Counselling slots this week</h2><p class="gd">The teachers who have a counselling slot this week: the timetable’s slots, plus any you add here. Use + and − to change a teacher’s slots (the planner picks a free period where the teacher has no class and a cabin is free), or add counselling to another teacher. Changes count for this week only and go straight into the schedule and the updated timetable.</p>${viewSlots()}</div>
-    <div class="group" id="sec-checks"><h2 class="gh">Checks</h2><p class="gd">Everything the planner needs is checked first. Problems in red keep the schedule locked; each one says where it is and how to fix it.</p>${viewChecks()}</div>
-    <div class="group" id="sec-teachers"><h2 class="gh">Teachers <span class="badge">${nT} with batches to counsel</span></h2><p class="gd">Set once, then edit here: add, change or delete a teacher. Uploading a Teachers file replaces the whole list, so keep one master file. “Batches to counsel” decides whose students each teacher gets. Senior teachers’ slots are never moved.</p>${viewTeachers()}</div>
+  const C = inputChecks(), L = C.filter(c => c.level === 'lock').length, files = !!(st.tt && st.students);
+  const needT = [...counselSlotTeachers()].some(t => !(s.teachers[t] && (s.teachers[t].counsel || []).length));
+  const strip = [
+    ['sec-files', 'Faculty timetable', st.tt ? 'ok' : '', st.tt && s.weekStart ? 'Week of ' + fmtShort(s.weekStart) : 'Upload this week’s'],
+    ['sec-files', 'Teachers', nT ? 'ok' : '', nT ? nT + ' with batches to counsel' : 'Upload once'],
+    ['sec-files', 'Student list', st.students ? 'ok' : '', st.students ? st.students.size.toLocaleString() + ' students' : 'Upload once'],
+    ['sec-checks', 'Checks', !files ? '' : L ? 'err' : 'ok', !files ? 'After the files' : L ? L + ' to fix' : 'All correct'],
+    ['go', 'Schedule', st.plan ? 'ok' : '', st.plan ? 'Calculated · open' : ok ? 'Ready to calculate' : 'Waiting']];
+  return head('Set up this week', 'Three files, a quick check, then calculate. The teachers and the student list stay on this computer, so most weeks you only upload the timetable.')
+  + `<nav class="rstrip" aria-label="Progress">${strip.map(([id, l, c, sub], i) => `<a class="rs ${c}" data-rs="${id}" href="#${id}"><i>${c === 'ok' ? '✓' : c === 'err' ? '!' : i + 1}</i><div style="min-width:0"><b>${l}</b><span>${sub}</span></div></a>`).join('')}</nav>
+  <div class="setup"><nav class="toc" aria-label="On this page"><ul>${nav.map(([id, l]) => `<li><a href="#${id}">${l}</a></li>`).join('')}</ul></nav><div class="setup-body">
+    <div class="group" id="sec-files"><h2 class="gh">Files</h2><p class="gd">Drop a file on its row, or click Upload.</p>${viewUpload()}</div>
+    <div class="group" id="sec-slots"><h2 class="gh">Counselling slots this week</h2><p class="gd">From the timetable. Use + and − to change a teacher’s slots, or add counselling to another teacher; the planner picks a free period and a free cabin. Changes count for this week only.</p>${viewSlots()}</div>
+    <div class="group" id="sec-checks"><h2 class="gh">Checks</h2><p class="gd">Problems in red keep the schedule locked; each says where it is and how to fix it.</p>${viewChecks()}</div>
+    <details class="fold" id="sec-teachers" ${needT || !nT ? 'open' : ''}><summary>Teachers <span class="muted">· ${nT} with batches to counsel${needT ? ' · <span style="color:var(--danger)">some teachers with a slot need batches</span>' : ''}</span></summary><p class="gd" style="margin-top:10px">“Batches to counsel” decides whose students each teacher gets. Senior teachers’ slots are never moved. Edit here, or upload the Teachers file in Files (it replaces the whole list).</p>${viewTeachers()}</details>
     <details class="fold" id="sec-btt"><summary>Batch timetable <span class="muted">· when each batch has class, and Shift mismatches</span></summary><p class="gd" style="margin-top:10px">Morning students are counselled only in evening periods, evening students only in morning periods, and never while their batch has class.</p>${viewBatchTT()}</details>
     <details class="fold" id="sec-adv"><summary>Advanced settings <span class="muted">· cabins, periods, buildings, records, backup</span></summary><p class="gd" style="margin-top:10px">Set once. Change only when cabins, period times or buildings change.</p>${viewWeek()}<div style="height:18px"></div>
-      <div class="card" style="padding:20px 24px;margin-bottom:18px"><h2 class="gh" style="font-size:18px;margin:0 0 4px">Saved weekly records</h2>${viewRecordsAdmin()}</div>${viewRules()}</details>
+      <div class="card" style="padding:20px 24px;margin-bottom:18px"><h2 class="gh" style="font-size:18px;margin:0 0 4px">Saved weekly records</h2>${viewRecordsAdmin()}</div>
+      <div class="card" style="padding:20px 24px;margin-bottom:18px"><h2 class="gh" style="font-size:18px;margin:0 0 4px">Access</h2>${viewPinAdmin()}</div>${viewRules()}</details>
     <div class="calcbar card"><div><b>${ok ? 'Ready to calculate' : 'Almost ready'}</b><span class="muted">${ok ? 'The schedule opens on the Weekly schedule page.' : 'Still to do: ' + todo.join(', ') + '.'}</span></div>
       <button class="btn primary" type="button" id="calc3" ${ok ? '' : 'disabled'}>Calculate schedule</button></div>
   </div></div>`;
@@ -2231,7 +2316,8 @@ function vBoard() {
     + groups.map((g, i) => `<h2 class="gh" style="margin:${i ? 28 : 6}px 0 10px">${esc(bldName(g.b))} <span class="muted" style="font-size:15px;font-weight:400">· cabin${g.cabins.length > 1 ? 's' : ''} ${g.cabins.map(esc).join(', ')} · ${st.plan.filter(p => g.cabins.includes(p.cabin)).length} slots</span></h2>${board(g.cabins, i === 0)}`).join('');
 }
 // teachers type a remark for each student they counselled; saved on this computer straight away
-function vRemarks() {
+function vRemarks(lock) {
+  if (lock) st.remT = lock;
   const ts = [...new Set(st.plan.map(p => p.t))].sort(nat), days = E.DAYS.filter(d => st.plan.some(p => p.day === d));
   if (st.remT && !ts.includes(st.remT)) st.remT = ''; if (!st.remDay || (st.remDay !== 'all' && !days.includes(st.remDay))) st.remDay = 'all';
   const byP = {}; st.result.rows.forEach(r => (byP[r.pid] = byP[r.pid] || []).push(r));
@@ -2239,9 +2325,9 @@ function vRemarks() {
     .sort((a, b) => E.DAYS.indexOf(a.day) - E.DAYS.indexOf(b.day) || E.SLOTS.indexOf(a.shift) - E.SLOTS.indexOf(b.shift) || nat(a.cabin, b.cabin));
   const shown = slots.flatMap(p => byP[p.id]), done = shown.filter(r => (aStu(r.s.roll).remarks || '').trim()).length;
   const attBadge = a => a === 'Present' ? '<span class="badge ok">Present</span>' : a === 'Absent' ? '<span class="badge err">Absent</span>' : '<span class="muted">not marked</span>';
-  return `<div class="notice i">Teachers write a short remark for each student they counselled. Remarks are saved on this computer as soon as you leave the box, and go into the report, the saved weekly records and the updated student list (that round's remarks column). Writing a remark marks the student Present if reception has not marked them.</div>
+  return `${lock ? '' : '<div class="notice i">Teachers write a short remark for each student they counselled. Remarks are saved on this computer as soon as you leave the box, and go into the report, the saved weekly records and the updated student list (that round\'s remarks column). Writing a remark marks the student Present if reception has not marked them.</div>'}
   <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
-    <select class="input sm" id="remT" aria-label="Teacher"><option value="">All teachers</option>${ts.map(t => `<option value="${esc(t)}" ${st.remT === t ? 'selected' : ''}>${esc(t)} · ${esc(tName(t))}</option>`).join('')}</select>
+    <select class="input sm ${lock ? 'hide' : ''}" id="remT" aria-label="Teacher"><option value="">All teachers</option>${ts.map(t => `<option value="${esc(t)}" ${st.remT === t ? 'selected' : ''}>${esc(t)} · ${esc(tName(t))}</option>`).join('')}</select>
     <select class="input sm" id="remDay" aria-label="Day"><option value="all">All days</option>${days.map(d => `<option value="${d}" ${st.remDay === d ? 'selected' : ''}>${d} ${fmtShort(dayDate(d))}</option>`).join('')}</select>
     <span class="muted">${done} of ${shown.length} students have a remark</span></div>
   ${slots.map(p => `<div class="card" style="padding:14px 18px;margin-bottom:14px"><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:baseline"><b style="font-size:16px">${esc(p.t)} · ${esc(tName(p.t))}</b><span class="muted">${p.day} ${fmtShort(p.date)} · ${p.shift} · ${E.hm(p.start)}–${E.hm(p.end)} · Cabin ${esc(p.cabin || '—')}</span></div>
@@ -2351,7 +2437,7 @@ function bind() {
   on('recFile', 'change', e => e.target.files[0] && onStudents(e.target.files[0]));
   all('[data-drop]', z => {
     z.addEventListener('dragover', e => { e.preventDefault(); z.classList.add('over'); }); z.addEventListener('dragleave', () => z.classList.remove('over'));
-    z.addEventListener('drop', e => { e.preventDefault(); z.classList.remove('over'); const f = e.dataTransfer.files[0]; if (f) (z.dataset.drop === 'tt' ? onTimetable : onStudents)(f); });
+    z.addEventListener('drop', e => { e.preventDefault(); z.classList.remove('over'); const f = e.dataTransfer.files[0]; if (f) ({ tt: onTimetable, rec: onStudents, teach: x => importTeachers(x).catch(err => alert(err.message)) })[z.dataset.drop](f); });
   });
   on('clearData', 'click', async () => { if (!confirm('Remove the uploaded timetable and student data from this browser?')) return; await idb.del('tt'); await idb.del('ttFile'); await idb.del('rec'); await idb.del('rec2'); Object.assign(st, { tt: null, records: null, v2: null, recMeta: null, recIssues: null, students: null }); resetSchedule(); render(); });
   // week & cabins
@@ -2418,6 +2504,16 @@ function bind() {
   on('resetSet', 'click', () => { if (!confirm('Reset cabins, periods, rules, teachers and batch buildings to the defaults?')) return; const w = st.settings.weekStart; st.settings = E.defaultSettings(MASTER); st.settings.weekStart = w; changed(); });
   // schedule
   all('[data-view]', b => b.onclick = () => { st.view = b.dataset.view; render(); });
+  // folded sections keep their open or closed state while you work
+  all('details.fold[id]', d => { if (st.folds && st.folds[d.id] !== undefined) d.open = st.folds[d.id]; const sm = d.querySelector('summary'); if (sm) sm.addEventListener('click', () => setTimeout(() => { (st.folds = st.folds || {})[d.id] = d.open; }, 0)); });
+  all('[data-rs]', a => a.onclick = e => { e.preventDefault(); const id = a.dataset.rs;
+    if (id === 'go') { if (st.plan) { st.step = 1; render(); scrollTo(0, 0); } else if (ready()) calculate(); return; }
+    const t = document.getElementById(id); if (t) { if (t.tagName === 'DETAILS') { t.open = true; (st.folds = st.folds || {})[t.id] = true; } t.scrollIntoView({ behavior: 'smooth', block: 'start' }); } });
+  all('[data-recv]', b => b.onclick = () => { st.recView = b.dataset.recv; render(); });
+  on('dlAnn', 'click', () => downloadSheets('announce')); on('dlAtt', 'click', () => downloadSheets('attendance'));
+  on('myT', 'change', e => { st.myTeacher = e.target.value; try { localStorage.setItem('mcs_my_teacher', st.myTeacher); } catch (x) {} st.remDay = 'all'; render(); });
+  on('pinSet', 'click', async () => { const a = prompt('New admin PIN (4 or more digits or letters)'); if (a === null) return; if (a.trim().length < 4) return toast('Use at least 4 characters'); const b = prompt('Type the PIN again'); if (b !== a) return toast('The two PINs did not match'); st.settings.adminPin = await pinHash(a.trim() === a ? a : a.trim()); changed(); toast('Admin PIN set'); });
+  on('pinOff', 'click', () => { if (!confirm('Remove the admin PIN? Anyone using this computer can then open the Admin view.')) return; delete st.settings.adminPin; changed(); toast('Admin PIN removed'); });
   on('moreView', 'change', e => { if (e.target.value) { st.view = e.target.value; render(); } });
   all('details.menu .menu-list button', b => b.addEventListener('click', () => { const d = b.closest('details'); if (d) d.open = false; }));
   all('[data-pid]', b => b.onclick = () => openEdit(b.dataset.pid));
@@ -2614,6 +2710,7 @@ async function downloadExcel() {
 /* ---------- start ---------- */
 document.querySelectorAll('.stepper button').forEach(b => b.onclick = () => { st.step = +b.dataset.step; render(); scrollTo(0, 0); });
 $('calcBtn').onclick = calculate;
+document.querySelectorAll('.roles [data-role]').forEach(b => b.onclick = () => switchRole(b.dataset.role));
 function markToc() {
   if (st.step !== 0) return; const links = [...document.querySelectorAll('.toc a')]; if (!links.length) return;
   let cur = links[0]; for (const a of links) { const t = document.getElementById(a.getAttribute('href').slice(1)); if (t && t.getBoundingClientRect().top < 200) cur = a; }

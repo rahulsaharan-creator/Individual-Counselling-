@@ -284,6 +284,34 @@ details.fold>summary .muted{font-weight:500;font-size:14px}
 .notice{border-radius:12px}
 .notice.i{background:var(--navy-soft)}
 .badge.ok{background:var(--accent-soft);color:var(--accent)}
+/* view switch */
+.roles{display:inline-flex;gap:2px;padding:3px;border:1px solid var(--line);border-radius:999px;background:var(--surface2)}
+.roles button{border:0;background:none;padding:6px 14px;border-radius:999px;font-weight:600;font-size:13.5px;color:var(--muted);cursor:pointer}
+.roles button.on{background:var(--surface);color:var(--accent);box-shadow:var(--sh1)}
+body[data-role="teacher"] .stepper,body[data-role="teacher"] #calcBtn,body[data-role="reception"] .stepper,body[data-role="reception"] #calcBtn{display:none}
+/* set up: progress strip */
+.rstrip{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0;border:1px solid var(--line);border-radius:16px;background:var(--surface);margin:0 0 28px;overflow:hidden;box-shadow:var(--sh1)}
+.rs{display:flex;gap:12px;align-items:center;padding:14px 16px;border-left:1px solid var(--line2);text-decoration:none;color:inherit;cursor:pointer;min-width:0}
+.rs:first-child{border-left:0}
+.rs:hover{background:var(--surface2)}
+.rs i{flex:none;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-style:normal;font-weight:700;font-size:13px;border:1.5px solid var(--line);color:var(--muted)}
+.rs.ok i{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.rs.err i{background:var(--danger-soft);border-color:var(--danger);color:var(--danger)}
+.rs b{display:block;font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rs span{display:block;font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rs.err span{color:var(--danger)}
+/* set up: compact files */
+.files{border:1px solid var(--line);border-radius:16px;background:var(--surface);box-shadow:var(--sh1);overflow:hidden}
+.frow{display:grid;grid-template-columns:40px minmax(0,1fr) minmax(0,1.6fr) auto;gap:16px;align-items:center;padding:14px 18px;border-top:1px solid var(--line2);transition:background .15s}
+.frow:first-child{border-top:0}
+.frow.over{background:var(--accent-soft)}
+.frow .fileic{width:36px;height:36px}
+.frow b{display:block;font-weight:700}
+.frow small{display:block;color:var(--muted);font-size:12.5px}
+.frow .fstat{font-size:13.5px;min-width:0}
+.frow .fstat .fn{display:block;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.frow .fact{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+@media (max-width:900px){.rstrip{grid-template-columns:1fr 1fr}.rs{border-left:0;border-top:1px solid var(--line2)}.frow{grid-template-columns:36px minmax(0,1fr)}.frow .fstat,.frow .fact{grid-column:2}.frow .fact{justify-content:flex-start}}
 .footer{max-width:1440px;margin:0 auto;padding:0 28px 28px;color:var(--muted);font-size:13px;display:flex;gap:8px;align-items:center}
 .footer img{height:18px;opacity:.9}
 .mcs-who{position:fixed;inset:0;z-index:100;display:grid;place-items:center;background:rgba(0,0,0,.2);padding:16px;box-sizing:border-box}
@@ -297,6 +325,7 @@ details.fold>summary .muted{font-weight:500;font-size:14px}
   <div class="bar">
     <div class="logo"><img class="logo-g" src="__LOGO_GREEN__" alt="Matrix Academy" width="150" height="26"><img class="logo-w" src="__LOGO_WHITE__" alt="Matrix Academy" width="150" height="26"><span class="sep" aria-hidden="true"></span>
       <div class="brand"><b>Counselling Planner</b><span id="weekLabel">No week loaded</span></div></div>
+    <div class="roles" role="group" aria-label="View as"><button type="button" data-role="admin">Admin</button><button type="button" data-role="reception">Reception</button><button type="button" data-role="teacher">Teacher</button></div>
     <button class="btn ghost icon-btn" id="themeBtn" type="button" aria-label="Switch between light and dark">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
     <button class="btn primary" id="calcBtn" type="button" disabled><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 21v-5h5"/></svg><span class="calc-label" id="calcLabel">Calculate schedule</span></button>
@@ -532,9 +561,11 @@ function render() {
     if (i === st.step) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current');
   });
   const y = window.scrollY;
-  const pg = st.step === 0 ? 'Set up' : 'Weekly schedule: ' + st.view;
+  const pg = st.role === 'teacher' ? 'Teacher view' : st.role === 'reception' ? 'Reception view: ' + (st.recView || 'att') : st.step === 0 ? 'Set up' : 'Weekly schedule: ' + st.view;
   if (pg !== window.__plannerPage) { window.__plannerPage = pg; T('page_view', { feature: pg }); }
-  $('main').innerHTML = [viewSetup, viewSchedule][st.step]();
+  document.body.dataset.role = st.role;
+  document.querySelectorAll('.roles [data-role]').forEach(b => { b.classList.toggle('on', b.dataset.role === st.role); b.setAttribute('aria-pressed', b.dataset.role === st.role); });
+  $('main').innerHTML = st.role === 'teacher' ? viewTeacherRole() : st.role === 'reception' ? viewReceptionRole() : [viewSetup, viewSchedule][st.step]();
   bind(); if (st.step === 0) { window.scrollTo(0, y); markToc(); }
 }
 const head = (title, lead, right = '') => `<div class="pagehead"><div><h1>${title}</h1><p class="lead">${lead}</p></div>${right ? `<div style="display:flex;gap:8px;flex-wrap:wrap">${right}</div>` : ''}</div>`;
@@ -589,6 +620,54 @@ async function downloadTB(empty) {
     await saveFile(empty ? 'Counselling_Teacher_Batches_Template.xlsx' : `Counselling_Teacher_Batches_${new Date().toISOString().slice(0, 10)}.xlsx`, new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
   } catch (e) { alert('The file could not be made: ' + e.message); }
 }
+/* ---------- three views: Admin (everything), Reception, Teacher ---------- */
+let _role = 'admin'; try { _role = localStorage.getItem('mcs_role') || 'admin'; } catch (e) {}
+st.role = ['admin', 'reception', 'teacher'].includes(_role) ? _role : 'admin';
+try { st.myTeacher = localStorage.getItem('mcs_my_teacher') || ''; } catch (e) {}
+async function pinHash(t) { const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('mcs-admin:' + t)); return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join(''); }
+async function switchRole(r) {
+  if (r === st.role) return;
+  if (r === 'admin' && st.settings.adminPin) {
+    const p = prompt('Admin PIN'); if (p === null) return;
+    if (await pinHash(p) !== st.settings.adminPin) return toast('Wrong PIN');
+  }
+  st.role = r; try { localStorage.setItem('mcs_role', r); } catch (e) {}
+  T('role_switch', { feature: r }); scrollTo(0, 0); render();
+}
+const notReady = (title, lead) => head(title, lead) + '<div class="card empty"><h2>This week’s schedule is not ready yet</h2><p class="muted">The admin calculates the schedule on the Set up page. Come back when it is done.</p></div>';
+function viewReceptionRole() {
+  if (!st.plan || !st.result) return notReady('Reception', 'Attendance and announcements for this week.');
+  const v = st.recView === 'announce' ? 'announce' : 'att', t = weekStats().tot;
+  return head('Reception', 'Mark teachers in and out, and students present or absent. Every change is saved on this computer straight away.',
+    `<button class="btn" type="button" id="dlAnn">${ICON.dl}Announcement sheet</button><button class="btn primary" type="button" id="dlAtt">${ICON.dl}Attendance sheet</button>`)
+  + `<div class="kpis"><div class="kpi"><b>${t.tin}<small style="font-size:18px;color:var(--muted)"> / ${t.slots}</small></b><span>Teachers came this week</span></div><div class="kpi"><b>${t.P}<small style="font-size:18px;color:var(--muted)"> / ${t.booked}</small></b><span>Students present</span></div>
+    <div class="kpi"><b>${t.A}</b><span>Students absent</span></div><div class="kpi"><b>${t.U}</b><span>Not marked yet</span></div></div>
+  <div class="tabs" role="tablist"><button type="button" role="tab" data-recv="att" class="${v === 'att' ? 'on' : ''}" aria-selected="${v === 'att'}">Attendance</button><button type="button" role="tab" data-recv="announce" class="${v === 'announce' ? 'on' : ''}" aria-selected="${v === 'announce'}">Announcements</button></div>
+  ${v === 'att' ? vReception(recModel()) : vAnnounce(recModel())}`;
+}
+function viewTeacherRole() {
+  if (!st.plan || !st.result) return notReady('Teacher remarks', 'Write a short remark for each student you counselled.');
+  const ts = [...new Set(st.plan.map(p => p.t))].sort((a, b) => tName(a).localeCompare(tName(b))), me = ts.includes(st.myTeacher) ? st.myTeacher : '';
+  const pick = `<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><label class="f" for="myT" style="margin:0">Your name</label><select class="input" id="myT" style="min-width:280px"><option value="">Choose your name</option>${ts.map(t => `<option value="${esc(t)}" ${t === me ? 'selected' : ''}>${esc(tName(t))} (${esc(t)})</option>`).join('')}</select></div>`;
+  return head(me ? esc(tName(me)) : 'Teacher remarks', me ? 'Your counselling sessions this week. Write a short remark for each student you counselled; it is saved as soon as you leave the box.' : 'Choose your name to see the students you counsel this week.')
+    + `<div class="card" style="padding:16px 20px;margin-bottom:18px">${pick}</div>` + (me ? vRemarks(me) : '');
+}
+async function downloadSheets(kind) {
+  busy(true, 'Building the sheet…'); await nextFrame();
+  try {
+    const wb = new ExcelJS.Workbook(), x = xl(wb);
+    if (kind === 'announce') sheetAnnounce(x); else { sheetInOut(x); sheetAttendance(x); sheetAbsent(x); }
+    const buf = await wb.xlsx.writeBuffer(); T('download_' + kind, { ok: true });
+    await saveFile(`Counselling_${kind === 'announce' ? 'Announcements' : 'Attendance'}_${st.settings.weekStart}.xlsx`, new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  } catch (e) { alert('The sheet could not be made: ' + e.message); }
+  busy(false);
+}
+function viewPinAdmin() {
+  const on = !!st.settings.adminPin;
+  return `<div class="optline" style="display:block"><b>Admin PIN</b> <span class="muted">${on ? 'Set. Switching to the Admin view asks for it.' : 'Not set: anyone using this computer can switch to the Admin view.'} Reception and teachers use their own views without a PIN.</span>
+    <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap"><button class="btn sm" type="button" id="pinSet">${on ? 'Change admin PIN' : 'Set an admin PIN'}</button>${on ? '<button class="btn ghost danger sm" type="button" id="pinOff">Remove PIN</button>' : ''}</div></div>`;
+}
+
 /* ---------- Logic v2: input checks, Teachers section, batch timetable ---------- */
 let _chk = null, _chkKey = '';
 function inputChecks() {
@@ -676,8 +755,6 @@ function viewTeachers() {
       <td><button class="btn ghost icon-btn danger" type="button" data-delt="${esc(c)}" aria-label="Delete ${esc(c)}">${ICON.del}</button></td></tr>`; }).join('');
   return `<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"><input class="input sm" id="tFilter" placeholder="Find a teacher or batch" style="width:220px" aria-label="Find a teacher or batch">
       <button class="btn sm" type="button" id="addT">${ICON.plus}Add teacher</button>
-      <label class="btn sm" style="cursor:pointer">Upload teachers<input type="file" accept=".xlsx" id="impT" class="hide"></label>
-      <button class="btn sm" type="button" id="dlT">${ICON.dl}Download teachers</button>
       ${st.tt ? '<button class="btn sm" type="button" id="fillTaught">Fill empty “Batches taught” from this week’s timetable</button>' : ''}</div>
     <div class="tbl scrollbox" style="max-height:560px"><table id="tTable"><thead><tr><th>Short name</th><th>Full name</th><th>Subject</th><th>Batches taught</th><th>Batches to counsel</th><th>Senior</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
@@ -772,17 +849,15 @@ async function downloadTemplate() {
 function viewUpload() {
   const tt = st.tt, rc = st.recMeta, kw = st.settings.keyword.toLowerCase();
   const counsel = tt ? tt.entries.filter(e => (e.room + ' ' + e.subj).toLowerCase().includes(kw)).length : 0;
-  return `<div class="uploads">
-    <label class="drop ${tt ? 'loaded' : ''}" data-drop="tt"><input type="file" accept=".xlsx,.xls" id="ttFile">
-      <span class="fileic">${ICON.file}</span><h3>Faculty timetable</h3>
-      <p>Excel with “Teacher, M1 … E3” for each day, and two rows per teacher: the subject, then the batch or room.</p>
-      <div class="status">${tt ? `<span class="badge ok">Loaded</span> <b>${esc(st.ttName)}</b><br><span class="muted">${tt.teachers.length} teachers · ${counsel} counselling cells${tt.weekStart ? ` · week of ${fmtShort(tt.weekStart)}` : ''}</span>` : '<span class="muted">Choose a file or drop it here</span>'}</div></label>
-    <label class="drop ${rc ? 'loaded' : ''}" data-drop="rec"><input type="file" accept=".xlsx,.xls" id="recFile">
-      <span class="fileic">${ICON.file}</span><h3>Student list</h3>
-      <p>One row per student: Roll No, Student Name, Batch, Shift (Morning or Evening, when the student has classes) and Status, then the counselling history in Round 1 to Round 5 columns (date, teacher, remarks). Upload it once; it stays on this computer.</p>
-      <div class="status">${rc ? `<span class="badge ok">Loaded</span> <b>${esc(st.recName)}</b><br><span class="muted">${st.students ? st.students.size.toLocaleString() : 0} students from ${rc.map(u => esc(u.sheet)).join(', ')}</span>` : '<span class="muted">Choose a file or drop it here</span>'}</div></label>
+  const T_ = st.settings.teachers, nT = Object.keys(T_).length, nC = Object.values(T_).filter(t => (t.counsel || []).length).length;
+  const row = (drop, title, when, stat, acts) => `<div class="frow" data-drop="${drop}"><span class="fileic">${ICON.file}</span><div><b>${title}</b><small>${when}</small></div><div class="fstat">${stat}</div><div class="fact">${acts}</div></div>`;
+  const up = (id, has, accept = '.xlsx,.xls') => `<label class="btn sm ${has ? '' : 'primary'}" style="cursor:pointer">${has ? 'Replace' : 'Upload'}<input type="file" accept="${accept}" id="${id}" class="hide"></label>`;
+  const none = '<span class="muted">Not uploaded yet · drop the file here or click Upload</span>';
+  return `<div class="files">
+    ${row('tt', 'Faculty timetable', 'Every week', tt ? `<span class="fn">${esc(st.ttName)}</span><span class="muted">${tt.teachers.length} teachers · ${counsel} counselling cells${tt.weekStart ? ` · week of ${fmtShort(tt.weekStart)}` : ''}</span>` : none, up('ttFile', !!tt))}
+    ${row('teach', 'Teachers', 'Once; upload again when it changes (replaces the list)', nT ? `<span class="fn">${nT} teachers</span><span class="muted">${nC} with batches to counsel</span>` : none, up('impT', nC > 0, '.xlsx') + `<button class="btn sm ghost" type="button" id="dlT">${ICON.dl}Download</button>`)}
+    ${row('rec', 'Student list', 'Once; upload again when students change', rc ? `<span class="fn">${esc(st.recName)}</span><span class="muted">${st.students ? st.students.size.toLocaleString() : 0} students</span>` : none, up('recFile', !!rc) + `<button class="btn sm ghost" type="button" id="dlTpl">${ICON.dl}Template</button>`)}
   </div>
-  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center"><button class="btn sm" type="button" id="dlTpl">${ICON.dl}Download student list template</button><span class="muted" style="font-size:13.5px">Empty list with the columns, dropdowns and instructions.</span></div>
   ${st.oldRec ? '<div class="notice w" style="margin-top:12px">The student file uploaded before has no Shift column, so it cannot be used any more. Upload the student list in the new format.</div>' : ''}
   ${recChecks()}
   ${tt && tt.warnings.length ? `<div class="notice w" style="margin-top:16px"><b>Timetable notes</b><ul>${tt.warnings.map(w => `<li>${esc(w)}</li>`).join('')}</ul></div>` : ''}
@@ -874,15 +949,25 @@ function viewSetup() {
   const nav = [['sec-files', 'Files'], ['sec-slots', 'Counselling slots'], ['sec-checks', 'Checks'], ['sec-teachers', 'Teachers'], ['sec-btt', 'Batch timetable'], ['sec-adv', 'Advanced settings']];
   const nl = locks().length; if (nl && st.tt && st.students) todo.push(`fix ${nl} problem${nl > 1 ? 's' : ''} under Checks`);
   const nT = Object.values(s.teachers).filter(t => (t.counsel || []).length).length;
-  return head('Set up', 'Upload the timetable each week. The student list and the teachers are set once and kept on this computer. The schedule opens when every check passes.')
-  + `<div class="setup"><nav class="toc" aria-label="On this page"><ul>${nav.map(([id, l]) => `<li><a href="#${id}">${l}</a></li>`).join('')}</ul></nav><div class="setup-body">
-    <div class="group" id="sec-files"><h2 class="gh">Files</h2><p class="gd">A new faculty timetable each week. The student list only when it changes.</p>${viewUpload()}</div>
-    <div class="group" id="sec-slots"><h2 class="gh">Counselling slots this week</h2><p class="gd">The teachers who have a counselling slot this week: the timetable’s slots, plus any you add here. Use + and − to change a teacher’s slots (the planner picks a free period where the teacher has no class and a cabin is free), or add counselling to another teacher. Changes count for this week only and go straight into the schedule and the updated timetable.</p>${viewSlots()}</div>
-    <div class="group" id="sec-checks"><h2 class="gh">Checks</h2><p class="gd">Everything the planner needs is checked first. Problems in red keep the schedule locked; each one says where it is and how to fix it.</p>${viewChecks()}</div>
-    <div class="group" id="sec-teachers"><h2 class="gh">Teachers <span class="badge">${nT} with batches to counsel</span></h2><p class="gd">Set once, then edit here: add, change or delete a teacher. Uploading a Teachers file replaces the whole list, so keep one master file. “Batches to counsel” decides whose students each teacher gets. Senior teachers’ slots are never moved.</p>${viewTeachers()}</div>
+  const C = inputChecks(), L = C.filter(c => c.level === 'lock').length, files = !!(st.tt && st.students);
+  const needT = [...counselSlotTeachers()].some(t => !(s.teachers[t] && (s.teachers[t].counsel || []).length));
+  const strip = [
+    ['sec-files', 'Faculty timetable', st.tt ? 'ok' : '', st.tt && s.weekStart ? 'Week of ' + fmtShort(s.weekStart) : 'Upload this week’s'],
+    ['sec-files', 'Teachers', nT ? 'ok' : '', nT ? nT + ' with batches to counsel' : 'Upload once'],
+    ['sec-files', 'Student list', st.students ? 'ok' : '', st.students ? st.students.size.toLocaleString() + ' students' : 'Upload once'],
+    ['sec-checks', 'Checks', !files ? '' : L ? 'err' : 'ok', !files ? 'After the files' : L ? L + ' to fix' : 'All correct'],
+    ['go', 'Schedule', st.plan ? 'ok' : '', st.plan ? 'Calculated · open' : ok ? 'Ready to calculate' : 'Waiting']];
+  return head('Set up this week', 'Three files, a quick check, then calculate. The teachers and the student list stay on this computer, so most weeks you only upload the timetable.')
+  + `<nav class="rstrip" aria-label="Progress">${strip.map(([id, l, c, sub], i) => `<a class="rs ${c}" data-rs="${id}" href="#${id}"><i>${c === 'ok' ? '✓' : c === 'err' ? '!' : i + 1}</i><div style="min-width:0"><b>${l}</b><span>${sub}</span></div></a>`).join('')}</nav>
+  <div class="setup"><nav class="toc" aria-label="On this page"><ul>${nav.map(([id, l]) => `<li><a href="#${id}">${l}</a></li>`).join('')}</ul></nav><div class="setup-body">
+    <div class="group" id="sec-files"><h2 class="gh">Files</h2><p class="gd">Drop a file on its row, or click Upload.</p>${viewUpload()}</div>
+    <div class="group" id="sec-slots"><h2 class="gh">Counselling slots this week</h2><p class="gd">From the timetable. Use + and − to change a teacher’s slots, or add counselling to another teacher; the planner picks a free period and a free cabin. Changes count for this week only.</p>${viewSlots()}</div>
+    <div class="group" id="sec-checks"><h2 class="gh">Checks</h2><p class="gd">Problems in red keep the schedule locked; each says where it is and how to fix it.</p>${viewChecks()}</div>
+    <details class="fold" id="sec-teachers" ${needT || !nT ? 'open' : ''}><summary>Teachers <span class="muted">· ${nT} with batches to counsel${needT ? ' · <span style="color:var(--danger)">some teachers with a slot need batches</span>' : ''}</span></summary><p class="gd" style="margin-top:10px">“Batches to counsel” decides whose students each teacher gets. Senior teachers’ slots are never moved. Edit here, or upload the Teachers file in Files (it replaces the whole list).</p>${viewTeachers()}</details>
     <details class="fold" id="sec-btt"><summary>Batch timetable <span class="muted">· when each batch has class, and Shift mismatches</span></summary><p class="gd" style="margin-top:10px">Morning students are counselled only in evening periods, evening students only in morning periods, and never while their batch has class.</p>${viewBatchTT()}</details>
     <details class="fold" id="sec-adv"><summary>Advanced settings <span class="muted">· cabins, periods, buildings, records, backup</span></summary><p class="gd" style="margin-top:10px">Set once. Change only when cabins, period times or buildings change.</p>${viewWeek()}<div style="height:18px"></div>
-      <div class="card" style="padding:20px 24px;margin-bottom:18px"><h2 class="gh" style="font-size:18px;margin:0 0 4px">Saved weekly records</h2>${viewRecordsAdmin()}</div>${viewRules()}</details>
+      <div class="card" style="padding:20px 24px;margin-bottom:18px"><h2 class="gh" style="font-size:18px;margin:0 0 4px">Saved weekly records</h2>${viewRecordsAdmin()}</div>
+      <div class="card" style="padding:20px 24px;margin-bottom:18px"><h2 class="gh" style="font-size:18px;margin:0 0 4px">Access</h2>${viewPinAdmin()}</div>${viewRules()}</details>
     <div class="calcbar card"><div><b>${ok ? 'Ready to calculate' : 'Almost ready'}</b><span class="muted">${ok ? 'The schedule opens on the Weekly schedule page.' : 'Still to do: ' + todo.join(', ') + '.'}</span></div>
       <button class="btn primary" type="button" id="calc3" ${ok ? '' : 'disabled'}>Calculate schedule</button></div>
   </div></div>`;
@@ -1034,7 +1119,8 @@ function vBoard() {
     + groups.map((g, i) => `<h2 class="gh" style="margin:${i ? 28 : 6}px 0 10px">${esc(bldName(g.b))} <span class="muted" style="font-size:15px;font-weight:400">· cabin${g.cabins.length > 1 ? 's' : ''} ${g.cabins.map(esc).join(', ')} · ${st.plan.filter(p => g.cabins.includes(p.cabin)).length} slots</span></h2>${board(g.cabins, i === 0)}`).join('');
 }
 // teachers type a remark for each student they counselled; saved on this computer straight away
-function vRemarks() {
+function vRemarks(lock) {
+  if (lock) st.remT = lock;
   const ts = [...new Set(st.plan.map(p => p.t))].sort(nat), days = E.DAYS.filter(d => st.plan.some(p => p.day === d));
   if (st.remT && !ts.includes(st.remT)) st.remT = ''; if (!st.remDay || (st.remDay !== 'all' && !days.includes(st.remDay))) st.remDay = 'all';
   const byP = {}; st.result.rows.forEach(r => (byP[r.pid] = byP[r.pid] || []).push(r));
@@ -1042,9 +1128,9 @@ function vRemarks() {
     .sort((a, b) => E.DAYS.indexOf(a.day) - E.DAYS.indexOf(b.day) || E.SLOTS.indexOf(a.shift) - E.SLOTS.indexOf(b.shift) || nat(a.cabin, b.cabin));
   const shown = slots.flatMap(p => byP[p.id]), done = shown.filter(r => (aStu(r.s.roll).remarks || '').trim()).length;
   const attBadge = a => a === 'Present' ? '<span class="badge ok">Present</span>' : a === 'Absent' ? '<span class="badge err">Absent</span>' : '<span class="muted">not marked</span>';
-  return `<div class="notice i">Teachers write a short remark for each student they counselled. Remarks are saved on this computer as soon as you leave the box, and go into the report, the saved weekly records and the updated student list (that round's remarks column). Writing a remark marks the student Present if reception has not marked them.</div>
+  return `${lock ? '' : '<div class="notice i">Teachers write a short remark for each student they counselled. Remarks are saved on this computer as soon as you leave the box, and go into the report, the saved weekly records and the updated student list (that round\'s remarks column). Writing a remark marks the student Present if reception has not marked them.</div>'}
   <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
-    <select class="input sm" id="remT" aria-label="Teacher"><option value="">All teachers</option>${ts.map(t => `<option value="${esc(t)}" ${st.remT === t ? 'selected' : ''}>${esc(t)} · ${esc(tName(t))}</option>`).join('')}</select>
+    <select class="input sm ${lock ? 'hide' : ''}" id="remT" aria-label="Teacher"><option value="">All teachers</option>${ts.map(t => `<option value="${esc(t)}" ${st.remT === t ? 'selected' : ''}>${esc(t)} · ${esc(tName(t))}</option>`).join('')}</select>
     <select class="input sm" id="remDay" aria-label="Day"><option value="all">All days</option>${days.map(d => `<option value="${d}" ${st.remDay === d ? 'selected' : ''}>${d} ${fmtShort(dayDate(d))}</option>`).join('')}</select>
     <span class="muted">${done} of ${shown.length} students have a remark</span></div>
   ${slots.map(p => `<div class="card" style="padding:14px 18px;margin-bottom:14px"><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:baseline"><b style="font-size:16px">${esc(p.t)} · ${esc(tName(p.t))}</b><span class="muted">${p.day} ${fmtShort(p.date)} · ${p.shift} · ${E.hm(p.start)}–${E.hm(p.end)} · Cabin ${esc(p.cabin || '—')}</span></div>
@@ -1154,7 +1240,7 @@ function bind() {
   on('recFile', 'change', e => e.target.files[0] && onStudents(e.target.files[0]));
   all('[data-drop]', z => {
     z.addEventListener('dragover', e => { e.preventDefault(); z.classList.add('over'); }); z.addEventListener('dragleave', () => z.classList.remove('over'));
-    z.addEventListener('drop', e => { e.preventDefault(); z.classList.remove('over'); const f = e.dataTransfer.files[0]; if (f) (z.dataset.drop === 'tt' ? onTimetable : onStudents)(f); });
+    z.addEventListener('drop', e => { e.preventDefault(); z.classList.remove('over'); const f = e.dataTransfer.files[0]; if (f) ({ tt: onTimetable, rec: onStudents, teach: x => importTeachers(x).catch(err => alert(err.message)) })[z.dataset.drop](f); });
   });
   on('clearData', 'click', async () => { if (!confirm('Remove the uploaded timetable and student data from this browser?')) return; await idb.del('tt'); await idb.del('ttFile'); await idb.del('rec'); await idb.del('rec2'); Object.assign(st, { tt: null, records: null, v2: null, recMeta: null, recIssues: null, students: null }); resetSchedule(); render(); });
   // week & cabins
@@ -1221,6 +1307,16 @@ function bind() {
   on('resetSet', 'click', () => { if (!confirm('Reset cabins, periods, rules, teachers and batch buildings to the defaults?')) return; const w = st.settings.weekStart; st.settings = E.defaultSettings(MASTER); st.settings.weekStart = w; changed(); });
   // schedule
   all('[data-view]', b => b.onclick = () => { st.view = b.dataset.view; render(); });
+  // folded sections keep their open or closed state while you work
+  all('details.fold[id]', d => { if (st.folds && st.folds[d.id] !== undefined) d.open = st.folds[d.id]; const sm = d.querySelector('summary'); if (sm) sm.addEventListener('click', () => setTimeout(() => { (st.folds = st.folds || {})[d.id] = d.open; }, 0)); });
+  all('[data-rs]', a => a.onclick = e => { e.preventDefault(); const id = a.dataset.rs;
+    if (id === 'go') { if (st.plan) { st.step = 1; render(); scrollTo(0, 0); } else if (ready()) calculate(); return; }
+    const t = document.getElementById(id); if (t) { if (t.tagName === 'DETAILS') { t.open = true; (st.folds = st.folds || {})[t.id] = true; } t.scrollIntoView({ behavior: 'smooth', block: 'start' }); } });
+  all('[data-recv]', b => b.onclick = () => { st.recView = b.dataset.recv; render(); });
+  on('dlAnn', 'click', () => downloadSheets('announce')); on('dlAtt', 'click', () => downloadSheets('attendance'));
+  on('myT', 'change', e => { st.myTeacher = e.target.value; try { localStorage.setItem('mcs_my_teacher', st.myTeacher); } catch (x) {} st.remDay = 'all'; render(); });
+  on('pinSet', 'click', async () => { const a = prompt('New admin PIN (4 or more digits or letters)'); if (a === null) return; if (a.trim().length < 4) return toast('Use at least 4 characters'); const b = prompt('Type the PIN again'); if (b !== a) return toast('The two PINs did not match'); st.settings.adminPin = await pinHash(a.trim() === a ? a : a.trim()); changed(); toast('Admin PIN set'); });
+  on('pinOff', 'click', () => { if (!confirm('Remove the admin PIN? Anyone using this computer can then open the Admin view.')) return; delete st.settings.adminPin; changed(); toast('Admin PIN removed'); });
   on('moreView', 'change', e => { if (e.target.value) { st.view = e.target.value; render(); } });
   all('details.menu .menu-list button', b => b.addEventListener('click', () => { const d = b.closest('details'); if (d) d.open = false; }));
   all('[data-pid]', b => b.onclick = () => openEdit(b.dataset.pid));
@@ -1417,6 +1513,7 @@ async function downloadExcel() {
 /* ---------- start ---------- */
 document.querySelectorAll('.stepper button').forEach(b => b.onclick = () => { st.step = +b.dataset.step; render(); scrollTo(0, 0); });
 $('calcBtn').onclick = calculate;
+document.querySelectorAll('.roles [data-role]').forEach(b => b.onclick = () => switchRole(b.dataset.role));
 function markToc() {
   if (st.step !== 0) return; const links = [...document.querySelectorAll('.toc a')]; if (!links.length) return;
   let cur = links[0]; for (const a of links) { const t = document.getElementById(a.getAttribute('href').slice(1)); if (t && t.getBoundingClientRect().top < 200) cur = a; }
