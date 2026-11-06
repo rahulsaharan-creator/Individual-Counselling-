@@ -94,6 +94,14 @@ h1{font-family:var(--serif);font-weight:500;font-size:38px;line-height:1.1;lette
 .badge{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:2px 10px;font-size:12.5px;font-weight:600;background:var(--surface2);border:1px solid var(--line)}
 .badge.warn{background:var(--brass-soft);border-color:transparent;color:var(--brass)}
 .badge.ok{background:var(--accent-soft);border-color:transparent;color:var(--accent)}
+.badge.err{background:var(--danger-soft);border-color:transparent;color:var(--danger)}
+.log{display:flex;flex-direction:column;gap:6px}
+.log details{border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:8px 12px}
+.log summary{cursor:pointer;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;list-style:none}
+.log summary::-webkit-details-marker{display:none}
+.log summary .badge{flex:none;min-width:44px;justify-content:center}
+.log ul{margin:8px 0 2px;padding-left:22px;font-size:13.5px;color:var(--muted)}
+.log li{margin:2px 0;overflow-wrap:anywhere}
 .chips{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .chip{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:5px 6px 5px 13px;font-weight:600;font-size:14px;border:1px solid transparent}
 .chip button{border:0;background:none;cursor:pointer;color:var(--muted);font-size:17px;line-height:1;padding:0 5px;border-radius:50%}
@@ -258,7 +266,7 @@ dialog form{display:flex;flex-direction:column;height:100%}
    roll numbers or any cell values. */
 (function () {
   var ENDPOINT = 'https://script.google.com/macros/s/AKfycbzvsFuNKkPP9nNw3Kh1BP9vJPVwKuhgQU3cKst8tYaQYFdxi7ZhsHRo6nL2RHY438JG/exec';
-  var APP_VERSION = '2026-11-05';
+  var APP_VERSION = '2026-11-06';
   var UKEY = 'mcs_planner_user', DKEY = 'mcs_planner_device';
   var on = /^https:\/\/script\.google\.com\//.test(ENDPOINT);
   function ls(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
@@ -711,21 +719,30 @@ dialog form{display:flex;flex-direction:column;height:100%}
     const activeStu = reachable.flatMap(b => byBatch.get(b) || []);
     const minTimes = activeStu.length ? Math.min(...activeStu.map(s => s.times)) : 0;
     const roundOn = settings.onceRound !== false; let roundGate = true;
+    // trace: for every slot, why each batch and each student was left out (first reason wins)
+    const trace = {};
+    const tr = pid => trace[pid] || (trace[pid] = { rules: [], batch: new Map(), stu: new Map() });
+    const note = (m, key, why) => { if (!m.has(key)) m.set(key, why); };
     function fill(p, batches, basis) {
-      const pool = [];
+      const pool = []; const T = tr(p.id); const R = { rule: basis, batches: batches.length, open: 0 }; T.rules.push(R);
       for (const b of batches) {
-        if (!freeAt(b, p.day, p.shift) || !placeOk(b, p)) continue;
-        if (!classOk(b, p.t)) { classSkips++; continue; }
+        const nStu = (byBatch.get(b) || []).length;
+        if (!ctx.occ.has(b)) { note(T.batch, b, ['noTimetable', nStu]); continue; }
+        if (ctx.occ.get(b).has(p.day + '|' + p.shift)) { note(T.batch, b, ['inClass', nStu]); continue; }
+        if (opposite && classShifts.get(b).has(p.shift[0])) { note(T.batch, b, ['sameShift', nStu]); continue; }
+        if (!placeOk(b, p)) { note(T.batch, b, ['campus', nStu]); continue; }
+        if (!classOk(b, p.t)) { classSkips++; note(T.batch, b, ['classGroup', nStu]); continue; }
+        R.open++; T.batch.set(b, ['open', nStu]);
         for (const s of (byBatch.get(b) || [])) pool.push(s);
       }
       pool.sort((a, b) => a.times - b.times || ((a.last || '') < (b.last || '') ? -1 : (a.last || '') > (b.last || '') ? 1 : a.batch < b.batch ? -1 : a.batch > b.batch ? 1 : a.roll < b.roll ? -1 : 1));
       for (const s of pool) {
-        if ((count.get(p.id) || 0) >= p.k) return;
-        if (used.has(s.roll)) continue;
-        if (roundOn && roundGate && s.times > minTimes) { roundSkips++; continue; }
-        if (gapCut && s.last && s.last >= gapCut) { gapSkips++; continue; }
-        if (settings.noRepeatTeacher && s.teachersSeen.has(p.t)) { repeatSkips++; continue; }
-        used.add(s.roll); count.set(p.id, (count.get(p.id) || 0) + 1); assign.push({ pid: p.id, s, basis });
+        if ((count.get(p.id) || 0) >= p.k) { note(T.stu, s.roll, 'seatsFull'); continue; }
+        if (used.has(s.roll)) { note(T.stu, s.roll, 'bookedElsewhere'); continue; }
+        if (roundOn && roundGate && s.times > minTimes) { roundSkips++; note(T.stu, s.roll, 'round'); continue; }
+        if (gapCut && s.last && s.last >= gapCut) { gapSkips++; note(T.stu, s.roll, 'gap'); continue; }
+        if (settings.noRepeatTeacher && s.teachersSeen.has(p.t)) { repeatSkips++; note(T.stu, s.roll, 'repeat'); continue; }
+        used.add(s.roll); count.set(p.id, (count.get(p.id) || 0) + 1); assign.push({ pid: p.id, s, basis }); T.stu.set(s.roll, 'booked');
       }
     }
     const tMatch = (r, t) => {
@@ -752,7 +769,14 @@ dialog form{display:flex;flex-direction:column;height:100%}
       const s = students.get(roll); if (!s || used.has(roll) || (count.get(p.id) || 0) >= p.k) continue;
       used.add(roll); count.set(p.id, (count.get(p.id) || 0) + 1); assign.push({ pid: p.id, s, basis: basis || 'Kept' });
     }
-    for (const r of rules) for (const p of plan) if (tMatch(r, p.t)) fill(p, pool(r, p.t), r.name || 'Rule');
+    const ruleMiss = (r, t) => r.sType === 'taught' ? `${t} teaches no batch that is in the student file`
+      : r.sType === 'group' ? (tcls(t) ? `no batch of ${t}'s class group (${tcls(t)}) is in both the student file and the timetable` : `${t} has no class set in the teacher list`)
+      : 'no batch in the student file matches this rule';
+    for (const r of rules) for (const p of plan) {
+      if (!tMatch(r, p.t)) { tr(p.id).rules.push({ rule: r.name || 'Rule', skipped: 'this rule does not apply to this teacher' }); continue; }
+      const b = pool(r, p.t); if (!b.length) { tr(p.id).rules.push({ rule: r.name || 'Rule', batches: 0, open: 0, empty: ruleMiss(r, p.t) }); continue; }
+      fill(p, b, r.name || 'Rule');
+    }
     // optional second pass: seats still empty go to the students counselled longest ago
     if (roundOn && settings.roundTopUp) { roundGate = false; for (const r of rules) for (const p of plan) if (tMatch(r, p.t)) fill(p, pool(r, p.t), (r.name || 'Rule') + ' (empty seat)'); }
     // times
@@ -773,10 +797,89 @@ dialog form{display:flex;flex-direction:column;height:100%}
       cov.active++; x.active++; if (s.times > 0) { cov.done++; x.done++; } if (s.times > minTimes) x.roundDone++;
     }
     cov.round = minTimes + 1; cov.roundDone = activeStu.filter(s => s.times > minTimes).length; cov.reachable = activeStu.length;
-    return { rows, repeatSkips, gapSkips, roundSkips, classSkips, minTimes, coverage: cov, batchCls, warnings: [...ftpNote, ...noCls, ...short], counts: Object.fromEntries(plan.map(p => [p.id, count.get(p.id) || 0])) };
+    const slotLog = plan.map(p => {
+      const T = trace[p.id] || { rules: [], batch: new Map(), stu: new Map() };
+      const bz = {}, sz = {};
+      for (const [b, [why, n]] of T.batch) { const x = bz[why] || (bz[why] = { batches: [], students: 0 }); x.batches.push(b); x.students += n; }
+      for (const why of T.stu.values()) sz[why] = (sz[why] || 0) + 1;
+      return { id: p.id, t: p.t, tClass: tcls(p.t) || '', day: p.day, shift: p.shift, site: p.site, cabin: p.cabin, k: p.k, filled: count.get(p.id) || 0, rules: T.rules, batches: bz, students: sz };
+    });
+    return { rows, repeatSkips, gapSkips, roundSkips, classSkips, minTimes, coverage: cov, batchCls, warnings: [...ftpNote, ...noCls, ...short], counts: Object.fromEntries(plan.map(p => [p.id, count.get(p.id) || 0])), slotLog, allB, studentBatches: [...byBatch.keys()], byBatchSize: Object.fromEntries([...byBatch].map(([b, a]) => [b, a.length])) };
   }
 
-  const api = { DAYS, SLOTS, COUNSEL_SHIFTS, activeShifts, defaultRules, defaultSettings, parseTimetable, parseStudents, buildStudents, buildPlan, finalizePlan, validatePlan, assignStudents, workload, makeCtx, hm, addDays };
+  /* ---------- the "why" log: every step from files to bookings, in plain words ---------- */
+  const B_WHY = {
+    noTimetable: 'batch is not in the timetable, so its free periods are unknown',
+    inClass: 'batch has a class at this time',
+    sameShift: 'batch studies in this shift (Opposite shift only is on)',
+    campus: 'batch is on the other campus',
+    classGroup: 'batch is a different class group from the teacher (Strict class matching is on)'
+  };
+  const S_WHY = {
+    bookedElsewhere: 'already booked with another teacher this week',
+    round: 'already counselled this round (Rounds is on)',
+    gap: 'counselled too recently (Minimum gap)',
+    repeat: 'has met this teacher before (No repeat teacher is on)',
+    seatsFull: 'slot was already full'
+  };
+  // level: ok | warn | fail
+  function buildLog(o) {
+    const { tt, settings, recMeta, students, plan, planWarnings, moves, result } = o; const L = [];
+    const add = (step, level, text, detail) => L.push({ step, level, text, detail: detail || [] });
+    const pl = (n, w) => `${n} ${w}${n === 1 ? '' : /ch$/.test(w) ? 'es' : 's'}`;
+    const kw = S(settings.keyword).toLowerCase();
+    // 1 timetable
+    if (!tt) add('Timetable', 'fail', 'No timetable is loaded.');
+    else {
+      const cells = tt.entries.filter(e => (e.room + ' ' + e.subj).toLowerCase().includes(kw));
+      add('Timetable', 'ok', `${pl(tt.teachers.length, 'teacher')} and ${pl(tt.entries.length, 'filled cell')} read. Week starts ${tt.weekStart || '(not found in the file)'}.`, tt.warnings);
+      add('Counselling cells', cells.length ? 'ok' : 'fail', cells.length ? `${pl(cells.length, 'cell')} contain the word "${settings.keyword}", one per counselling slot.` : `No cell contains the word "${settings.keyword}". The planner finds counselling slots by this word. Check the spelling in the timetable or in Set up.`);
+      const off = cells.filter(e => !activeShifts(settings).includes(e.slot));
+      if (off.length) add('Counselling periods', 'warn', `${pl(off.length, 'counselling cell')} fall in periods switched off for counselling and were skipped.`, off.map(e => `${e.t} ${e.day} ${e.slot}`));
+    }
+    if (!settings.weekStart) add('Week', 'fail', 'No week start date is set.');
+    // 2 students
+    if (!students) add('Student file', 'fail', 'No student file is loaded.');
+    else {
+      const withH = [...students.values()].filter(s => s.times > 0).length;
+      add('Student file', students.size ? 'ok' : 'fail', `${pl(students.size, 'student')} found; ${withH} have counselling history before this week.`, (recMeta || []).map(m => `Sheet "${m.sheet}": ${m.rows} rows, counsellor column: ${m.counsellorColumn}`));
+    }
+    if (!result) { add('Matching', 'fail', 'The schedule has not been calculated yet.'); return L; }
+    // 3 batches: student batch codes must match timetable room codes
+    const sb = result.studentBatches, inTT = sb.filter(b => result.allB.includes(b)), notTT = sb.filter(b => !result.allB.includes(b));
+    const lost = notTT.reduce((a, b) => a + result.byBatchSize[b], 0);
+    add('Batches matched to timetable', !inTT.length ? 'fail' : notTT.length ? 'warn' : 'ok',
+      !inTT.length ? `None of the ${pl(sb.length, 'batch')} in the student file appears in the timetable. The planner learns when a batch is free from the timetable, so no student can be booked. Check that batch codes are written the same way in both files.`
+        : `${inTT.length} of ${pl(sb.length, 'batch')} in the student file appear in the timetable.${notTT.length ? ` ${pl(lost, 'student')} in the other ${notTT.length} can never be booked.` : ''}`,
+      notTT.map(b => `${b} (${pl(result.byBatchSize[b], 'student')}) is not in the timetable`));
+    const noCls = inTT.filter(b => !result.batchCls[b]);
+    if (noCls.length) add('Batch class', 'warn', `${pl(noCls.length, 'batch')} have no class (11th / 12th / Target), because none of their teachers has a class in the teacher list. The "Same class group" rule cannot use them.`, noCls);
+    // 4 slots and cabins
+    add('Counselling slots', plan.length ? 'ok' : 'fail', `${pl(plan.length, 'slot')} planned with ${plan.reduce((a, p) => a + p.k, 0)} seats; ${pl(moves.length, 'slot')} moved to a free cabin.`, planWarnings);
+    // 5 rounds
+    const c = result.coverage;
+    if (settings.onceRound !== false) {
+      const due = c.reachable - c.roundDone;
+      add('Rounds', due < c.reachable / 2 ? 'warn' : 'ok', `Round ${c.round}: only students counselled ${result.minTimes} time${result.minTimes === 1 ? '' : 's'} can be booked. ${due} of ${c.reachable} reachable students are still due; ${c.roundDone} are held back until the round ends.${settings.roundTopUp ? '' : ' "Fill empty seats" is off, so their seats stay empty.'}`);
+    }
+    // 6 per slot
+    const booked = result.rows.length, cap = plan.reduce((a, p) => a + p.k, 0);
+    add('Matching', booked ? (booked < cap ? 'warn' : 'ok') : 'fail', `${booked} of ${cap} seats filled. Rejections: ${result.roundSkips} by Rounds, ${result.repeatSkips} by No repeat teacher, ${result.gapSkips} by Minimum gap, ${result.classSkips} batch checks by Strict class matching.`);
+    for (const x of result.slotLog) {
+      const d = [];
+      for (const r of x.rules) d.push(r.skipped ? `Rule "${r.rule}": skipped, ${r.skipped}.` : r.empty ? `Rule "${r.rule}": no batches, ${r.empty}.` : `Rule "${r.rule}": ${pl(r.batches, 'batch')} considered, ${r.open} free and allowed.`);
+      for (const [w, v] of Object.entries(x.batches)) if (w !== 'open') d.push(`${pl(v.batches.length, 'batch')} out (${v.students} students): ${B_WHY[w]}. ${v.batches.slice(0, 12).join(', ')}${v.batches.length > 12 ? ' …' : ''}`);
+      for (const [w, n] of Object.entries(x.students)) if (w !== 'booked') d.push(`${pl(n, 'student')} out: ${S_WHY[w]}.`);
+      // main reason: what removed the most students
+      const cand = [...Object.entries(x.batches).filter(([w]) => w !== 'open').map(([w, v]) => [B_WHY[w], v.students]), ...Object.entries(x.students).filter(([w]) => w !== 'booked').map(([w, n]) => [S_WHY[w], n])].sort((a, b) => b[1] - a[1]);
+      const main = x.filled >= x.k ? 'full' : !x.rules.some(r => r.batches) ? 'no rule gave this teacher any batch' : cand.length ? cand[0][0] : 'no free students';
+      add(`${x.day} ${x.shift} · ${x.t}${x.tClass ? ' (' + x.tClass + ')' : ''}`, x.filled >= x.k ? 'ok' : x.filled ? 'warn' : 'fail', `${x.filled} of ${x.k} seats filled${x.filled >= x.k ? '.' : `. Main reason: ${main}.`}`, d);
+    }
+    return L;
+  }
+  const logText = L => L.map(l => `[${l.level.toUpperCase()}] ${l.step}: ${l.text}` + l.detail.map(d => '\n    - ' + d).join('')).join('\n');
+
+  const api = { DAYS, SLOTS, COUNSEL_SHIFTS, activeShifts, defaultRules, defaultSettings, parseTimetable, parseStudents, buildStudents, buildPlan, finalizePlan, validatePlan, assignStudents, workload, makeCtx, hm, addDays, buildLog, logText };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.MCSEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);
 </script>
@@ -970,7 +1073,8 @@ async function calculate() {
   try {
     rebuildStudents(); const bp = E.buildPlan(st.tt, st.settings);
     st.plan = bp.plan; st.moves = bp.moves; st.planWarnings = bp.warnings; st.excluded = new Set(); st.keep = {};
-    assign(); st.step = 1; st.view = 'board'; scrollTo(0, 0); persistEdits(); toast('Schedule calculated');
+    assign(); try { console.groupCollapsed('Counselling planner: why log'); console.log(E.logText(whyLog())); console.groupEnd(); } catch (e) {}
+    st.step = 1; st.view = 'board'; scrollTo(0, 0); persistEdits(); toast('Schedule calculated');
     T('calculate', { ok: true, recalculate: again, ms: Math.round(performance.now() - t0), slots: st.plan.length, booked: st.result && st.result.rows ? st.result.rows.length : null, moves: st.moves.length, warnings: st.planWarnings.length, checks: (st.result && st.result.invalid || []).length, students: st.students ? st.students.size : null });
   } catch (e) { T('calculate', { ok: false, recalculate: again, ms: Math.round(performance.now() - t0) }); alert('Calculation failed: ' + e.message); console.error(e); }
   busy(false); render();
@@ -1132,14 +1236,15 @@ function viewSchedule() {
       <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap"><button class="btn" type="button" data-go="0">Go to set up</button><button class="btn primary" type="button" id="calc4" ${ready() ? '' : 'disabled'}>Calculate schedule</button></div></div>`;
   const r = st.result, cap = st.plan.reduce((a, p) => a + p.k, 0);
   const notes = [...(r.invalid || []).map(x => ['e', x]), ...st.planWarnings.map(x => ['w', x]), ...r.warnings.map(x => ['w', x])];
-  const views = [['board', 'Cabin board'], ['sessions', 'Teacher sessions'], ['students', 'Students'], ['reception', 'Reception'], ['announce', 'Announcements'], ['dash', 'Dashboard'], ['workload', 'Workload'], ['notes', `Moves and notes · ${st.moves.length + notes.length}`]];
+  const views = [['board', 'Cabin board'], ['sessions', 'Teacher sessions'], ['students', 'Students'], ['reception', 'Reception'], ['announce', 'Announcements'], ['dash', 'Dashboard'], ['workload', 'Workload'], ['why', `Why · log${r.rows.length < cap ? ' ⚠' : ''}`], ['notes', `Moves and notes · ${st.moves.length + notes.length}`]];
   return head('Weekly schedule', 'Select a slot on the board to move it, change its students or remove it. The student list updates straight away.',
     `<button class="btn" type="button" id="addSlot">${ICON.plus}Add slot</button><button class="btn" type="button" id="dlRep">${ICON.dl}Download report</button><button class="btn primary" type="button" id="dl">${ICON.dl}Download Excel</button>`)
   + `<div class="kpis"><div class="kpi"><b>${st.plan.length}</b><span>Counselling slots</span></div><div class="kpi"><b>${r.rows.length}</b><span>Students booked of ${cap} seats</span></div>
      <div class="kpi"><b>${st.moves.length}</b><span>Slots moved to a free cabin</span></div><div class="kpi"><b>${r.repeatSkips}</b><span>Repeat teachers avoided</span></div></div>
+  ${r.rows.length < cap && st.view !== 'why' ? `<div class="notice i">${cap - r.rows.length} seats are empty. <button class="btn sm" type="button" data-view="why">See why</button></div>` : ''}
   ${notes.some(n => n[0] === 'e') ? `<div class="notice e"><b>Fix before sending</b><ul>${notes.filter(n => n[0] === 'e').map(n => `<li>${esc(n[1])}</li>`).join('')}</ul></div>` : ''}
   <div class="tabs" role="tablist">${views.map(([k, l]) => `<button type="button" role="tab" aria-selected="${st.view === k}" class="${st.view === k ? 'on' : ''}" data-view="${k}">${l}</button>`).join('')}</div>
-  ${({ board: vBoard, sessions: vSessions, students: vStudents, reception: () => vReception(recModel()), announce: () => vAnnounce(recModel()), dash: vDash, workload: vWorkload, notes: () => vNotes(notes) })[st.view]()}`;
+  ${({ board: vBoard, sessions: vSessions, students: vStudents, reception: () => vReception(recModel()), announce: () => vAnnounce(recModel()), dash: vDash, workload: vWorkload, why: vWhy, notes: () => vNotes(notes) })[st.view]()}`;
 }
 const weekText = () => `${fmtDate(st.settings.weekStart)} – ${fmtDate(E.addDays(st.settings.weekStart, 5))}`;
 // counts for the reception, dashboard and report: per day, per slot and for the week
@@ -1296,6 +1401,19 @@ function vNotes(notes) {
   ${notes.length ? `<div class="card" style="padding:18px 22px"><ul style="margin:0;padding-left:20px">${notes.map(n => `<li style="${n[0] === 'e' ? 'color:var(--danger)' : ''}">${esc(n[1])}</li>`).join('')}</ul></div>` : ''}`;
 }
 
+// the "why" log: each step from the files to the bookings, with the reason seats stayed empty
+function whyLog() {
+  return E.buildLog({ tt: st.tt, settings: st.settings, recMeta: st.recMeta, students: st.students, plan: st.plan || [], planWarnings: st.planWarnings || [], moves: st.moves || [], result: st.result });
+}
+function vWhy() {
+  const L = whyLog(), all = !!st.logAll, BADGE = { ok: ['ok', 'OK'], warn: ['warn', 'Check'], fail: ['err', 'Problem'] };
+  const shown = all ? L : L.filter(l => l.level !== 'ok');
+  return `<div class="notice i">Every check the planner ran, in order: files, batches, slots, then each teacher slot. Open a line to see which batches and students were left out and which rule removed them.</div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"><button class="btn sm" type="button" id="logAll">${all ? 'Show problems only' : 'Show all lines'}</button><button class="btn sm" type="button" id="dlLog">${ICON.dl}Download log</button>
+    <span class="muted" style="align-self:center">${L.filter(l => l.level === 'fail').length} problems · ${L.filter(l => l.level === 'warn').length} to check · ${L.filter(l => l.level === 'ok').length} OK</span></div>
+  <div class="log">${shown.length ? shown.map(l => `<details ${l.level === 'fail' && !/·/.test(l.step) ? 'open' : ''}><summary><span class="badge ${BADGE[l.level][0]}">${BADGE[l.level][1]}</span><b>${esc(l.step)}</b><span>${esc(l.text)}</span></summary>${l.detail.length ? `<ul>${l.detail.map(d => `<li>${esc(d)}</li>`).join('')}</ul>` : ''}</details>`).join('') : '<div class="notice i">No problems found. Every seat is filled.</div>'}</div>`;
+}
+
 /* ---------- edit panel ---------- */
 function openEdit(pid) {
   const p = st.plan.find(x => x.id === pid), s = st.settings, isNew = !p, ctx = E.makeCtx(st.tt, s);
@@ -1408,6 +1526,8 @@ function bind() {
   on('addSlot', 'click', () => openEdit(null));
   on('dl', 'click', downloadExcel);
   on('dlRep', 'click', downloadReport);
+  on('logAll', 'click', () => { st.logAll = !st.logAll; render(); });
+  on('dlLog', 'click', () => { T('download_log', { ok: true }); saveFile(`Counselling_Why_Log_${st.settings.weekStart}.txt`, new Blob([E.logText(whyLog())], { type: 'text/plain' })); });
   ['expRec', 'expRec2'].forEach(id => on(id, 'click', exportRecords));
   on('impRec', 'change', e => e.target.files[0] && importRecords(e.target.files[0]).catch(x => alert(x.message)));
   // reception desk: teacher in-out and student attendance, saved per week without redrawing the page

@@ -347,21 +347,30 @@
     const activeStu = reachable.flatMap(b => byBatch.get(b) || []);
     const minTimes = activeStu.length ? Math.min(...activeStu.map(s => s.times)) : 0;
     const roundOn = settings.onceRound !== false; let roundGate = true;
+    // trace: for every slot, why each batch and each student was left out (first reason wins)
+    const trace = {};
+    const tr = pid => trace[pid] || (trace[pid] = { rules: [], batch: new Map(), stu: new Map() });
+    const note = (m, key, why) => { if (!m.has(key)) m.set(key, why); };
     function fill(p, batches, basis) {
-      const pool = [];
+      const pool = []; const T = tr(p.id); const R = { rule: basis, batches: batches.length, open: 0 }; T.rules.push(R);
       for (const b of batches) {
-        if (!freeAt(b, p.day, p.shift) || !placeOk(b, p)) continue;
-        if (!classOk(b, p.t)) { classSkips++; continue; }
+        const nStu = (byBatch.get(b) || []).length;
+        if (!ctx.occ.has(b)) { note(T.batch, b, ['noTimetable', nStu]); continue; }
+        if (ctx.occ.get(b).has(p.day + '|' + p.shift)) { note(T.batch, b, ['inClass', nStu]); continue; }
+        if (opposite && classShifts.get(b).has(p.shift[0])) { note(T.batch, b, ['sameShift', nStu]); continue; }
+        if (!placeOk(b, p)) { note(T.batch, b, ['campus', nStu]); continue; }
+        if (!classOk(b, p.t)) { classSkips++; note(T.batch, b, ['classGroup', nStu]); continue; }
+        R.open++; T.batch.set(b, ['open', nStu]);
         for (const s of (byBatch.get(b) || [])) pool.push(s);
       }
       pool.sort((a, b) => a.times - b.times || ((a.last || '') < (b.last || '') ? -1 : (a.last || '') > (b.last || '') ? 1 : a.batch < b.batch ? -1 : a.batch > b.batch ? 1 : a.roll < b.roll ? -1 : 1));
       for (const s of pool) {
-        if ((count.get(p.id) || 0) >= p.k) return;
-        if (used.has(s.roll)) continue;
-        if (roundOn && roundGate && s.times > minTimes) { roundSkips++; continue; }
-        if (gapCut && s.last && s.last >= gapCut) { gapSkips++; continue; }
-        if (settings.noRepeatTeacher && s.teachersSeen.has(p.t)) { repeatSkips++; continue; }
-        used.add(s.roll); count.set(p.id, (count.get(p.id) || 0) + 1); assign.push({ pid: p.id, s, basis });
+        if ((count.get(p.id) || 0) >= p.k) { note(T.stu, s.roll, 'seatsFull'); continue; }
+        if (used.has(s.roll)) { note(T.stu, s.roll, 'bookedElsewhere'); continue; }
+        if (roundOn && roundGate && s.times > minTimes) { roundSkips++; note(T.stu, s.roll, 'round'); continue; }
+        if (gapCut && s.last && s.last >= gapCut) { gapSkips++; note(T.stu, s.roll, 'gap'); continue; }
+        if (settings.noRepeatTeacher && s.teachersSeen.has(p.t)) { repeatSkips++; note(T.stu, s.roll, 'repeat'); continue; }
+        used.add(s.roll); count.set(p.id, (count.get(p.id) || 0) + 1); assign.push({ pid: p.id, s, basis }); T.stu.set(s.roll, 'booked');
       }
     }
     const tMatch = (r, t) => {
@@ -388,7 +397,14 @@
       const s = students.get(roll); if (!s || used.has(roll) || (count.get(p.id) || 0) >= p.k) continue;
       used.add(roll); count.set(p.id, (count.get(p.id) || 0) + 1); assign.push({ pid: p.id, s, basis: basis || 'Kept' });
     }
-    for (const r of rules) for (const p of plan) if (tMatch(r, p.t)) fill(p, pool(r, p.t), r.name || 'Rule');
+    const ruleMiss = (r, t) => r.sType === 'taught' ? `${t} teaches no batch that is in the student file`
+      : r.sType === 'group' ? (tcls(t) ? `no batch of ${t}'s class group (${tcls(t)}) is in both the student file and the timetable` : `${t} has no class set in the teacher list`)
+      : 'no batch in the student file matches this rule';
+    for (const r of rules) for (const p of plan) {
+      if (!tMatch(r, p.t)) { tr(p.id).rules.push({ rule: r.name || 'Rule', skipped: 'this rule does not apply to this teacher' }); continue; }
+      const b = pool(r, p.t); if (!b.length) { tr(p.id).rules.push({ rule: r.name || 'Rule', batches: 0, open: 0, empty: ruleMiss(r, p.t) }); continue; }
+      fill(p, b, r.name || 'Rule');
+    }
     // optional second pass: seats still empty go to the students counselled longest ago
     if (roundOn && settings.roundTopUp) { roundGate = false; for (const r of rules) for (const p of plan) if (tMatch(r, p.t)) fill(p, pool(r, p.t), (r.name || 'Rule') + ' (empty seat)'); }
     // times
@@ -409,9 +425,88 @@
       cov.active++; x.active++; if (s.times > 0) { cov.done++; x.done++; } if (s.times > minTimes) x.roundDone++;
     }
     cov.round = minTimes + 1; cov.roundDone = activeStu.filter(s => s.times > minTimes).length; cov.reachable = activeStu.length;
-    return { rows, repeatSkips, gapSkips, roundSkips, classSkips, minTimes, coverage: cov, batchCls, warnings: [...ftpNote, ...noCls, ...short], counts: Object.fromEntries(plan.map(p => [p.id, count.get(p.id) || 0])) };
+    const slotLog = plan.map(p => {
+      const T = trace[p.id] || { rules: [], batch: new Map(), stu: new Map() };
+      const bz = {}, sz = {};
+      for (const [b, [why, n]] of T.batch) { const x = bz[why] || (bz[why] = { batches: [], students: 0 }); x.batches.push(b); x.students += n; }
+      for (const why of T.stu.values()) sz[why] = (sz[why] || 0) + 1;
+      return { id: p.id, t: p.t, tClass: tcls(p.t) || '', day: p.day, shift: p.shift, site: p.site, cabin: p.cabin, k: p.k, filled: count.get(p.id) || 0, rules: T.rules, batches: bz, students: sz };
+    });
+    return { rows, repeatSkips, gapSkips, roundSkips, classSkips, minTimes, coverage: cov, batchCls, warnings: [...ftpNote, ...noCls, ...short], counts: Object.fromEntries(plan.map(p => [p.id, count.get(p.id) || 0])), slotLog, allB, studentBatches: [...byBatch.keys()], byBatchSize: Object.fromEntries([...byBatch].map(([b, a]) => [b, a.length])) };
   }
 
-  const api = { DAYS, SLOTS, COUNSEL_SHIFTS, activeShifts, defaultRules, defaultSettings, parseTimetable, parseStudents, buildStudents, buildPlan, finalizePlan, validatePlan, assignStudents, workload, makeCtx, hm, addDays };
+  /* ---------- the "why" log: every step from files to bookings, in plain words ---------- */
+  const B_WHY = {
+    noTimetable: 'batch is not in the timetable, so its free periods are unknown',
+    inClass: 'batch has a class at this time',
+    sameShift: 'batch studies in this shift (Opposite shift only is on)',
+    campus: 'batch is on the other campus',
+    classGroup: 'batch is a different class group from the teacher (Strict class matching is on)'
+  };
+  const S_WHY = {
+    bookedElsewhere: 'already booked with another teacher this week',
+    round: 'already counselled this round (Rounds is on)',
+    gap: 'counselled too recently (Minimum gap)',
+    repeat: 'has met this teacher before (No repeat teacher is on)',
+    seatsFull: 'slot was already full'
+  };
+  // level: ok | warn | fail
+  function buildLog(o) {
+    const { tt, settings, recMeta, students, plan, planWarnings, moves, result } = o; const L = [];
+    const add = (step, level, text, detail) => L.push({ step, level, text, detail: detail || [] });
+    const pl = (n, w) => `${n} ${w}${n === 1 ? '' : /ch$/.test(w) ? 'es' : 's'}`;
+    const kw = S(settings.keyword).toLowerCase();
+    // 1 timetable
+    if (!tt) add('Timetable', 'fail', 'No timetable is loaded.');
+    else {
+      const cells = tt.entries.filter(e => (e.room + ' ' + e.subj).toLowerCase().includes(kw));
+      add('Timetable', 'ok', `${pl(tt.teachers.length, 'teacher')} and ${pl(tt.entries.length, 'filled cell')} read. Week starts ${tt.weekStart || '(not found in the file)'}.`, tt.warnings);
+      add('Counselling cells', cells.length ? 'ok' : 'fail', cells.length ? `${pl(cells.length, 'cell')} contain the word "${settings.keyword}", one per counselling slot.` : `No cell contains the word "${settings.keyword}". The planner finds counselling slots by this word. Check the spelling in the timetable or in Set up.`);
+      const off = cells.filter(e => !activeShifts(settings).includes(e.slot));
+      if (off.length) add('Counselling periods', 'warn', `${pl(off.length, 'counselling cell')} fall in periods switched off for counselling and were skipped.`, off.map(e => `${e.t} ${e.day} ${e.slot}`));
+    }
+    if (!settings.weekStart) add('Week', 'fail', 'No week start date is set.');
+    // 2 students
+    if (!students) add('Student file', 'fail', 'No student file is loaded.');
+    else {
+      const withH = [...students.values()].filter(s => s.times > 0).length;
+      add('Student file', students.size ? 'ok' : 'fail', `${pl(students.size, 'student')} found; ${withH} have counselling history before this week.`, (recMeta || []).map(m => `Sheet "${m.sheet}": ${m.rows} rows, counsellor column: ${m.counsellorColumn}`));
+    }
+    if (!result) { add('Matching', 'fail', 'The schedule has not been calculated yet.'); return L; }
+    // 3 batches: student batch codes must match timetable room codes
+    const sb = result.studentBatches, inTT = sb.filter(b => result.allB.includes(b)), notTT = sb.filter(b => !result.allB.includes(b));
+    const lost = notTT.reduce((a, b) => a + result.byBatchSize[b], 0);
+    add('Batches matched to timetable', !inTT.length ? 'fail' : notTT.length ? 'warn' : 'ok',
+      !inTT.length ? `None of the ${pl(sb.length, 'batch')} in the student file appears in the timetable. The planner learns when a batch is free from the timetable, so no student can be booked. Check that batch codes are written the same way in both files.`
+        : `${inTT.length} of ${pl(sb.length, 'batch')} in the student file appear in the timetable.${notTT.length ? ` ${pl(lost, 'student')} in the other ${notTT.length} can never be booked.` : ''}`,
+      notTT.map(b => `${b} (${pl(result.byBatchSize[b], 'student')}) is not in the timetable`));
+    const noCls = inTT.filter(b => !result.batchCls[b]);
+    if (noCls.length) add('Batch class', 'warn', `${pl(noCls.length, 'batch')} have no class (11th / 12th / Target), because none of their teachers has a class in the teacher list. The "Same class group" rule cannot use them.`, noCls);
+    // 4 slots and cabins
+    add('Counselling slots', plan.length ? 'ok' : 'fail', `${pl(plan.length, 'slot')} planned with ${plan.reduce((a, p) => a + p.k, 0)} seats; ${pl(moves.length, 'slot')} moved to a free cabin.`, planWarnings);
+    // 5 rounds
+    const c = result.coverage;
+    if (settings.onceRound !== false) {
+      const due = c.reachable - c.roundDone;
+      add('Rounds', due < c.reachable / 2 ? 'warn' : 'ok', `Round ${c.round}: only students counselled ${result.minTimes} time${result.minTimes === 1 ? '' : 's'} can be booked. ${due} of ${c.reachable} reachable students are still due; ${c.roundDone} are held back until the round ends.${settings.roundTopUp ? '' : ' "Fill empty seats" is off, so their seats stay empty.'}`);
+    }
+    // 6 per slot
+    const booked = result.rows.length, cap = plan.reduce((a, p) => a + p.k, 0);
+    add('Matching', booked ? (booked < cap ? 'warn' : 'ok') : 'fail', `${booked} of ${cap} seats filled. Rejections: ${result.roundSkips} by Rounds, ${result.repeatSkips} by No repeat teacher, ${result.gapSkips} by Minimum gap, ${result.classSkips} batch checks by Strict class matching.`);
+    for (const x of result.slotLog) {
+      const d = [];
+      for (const r of x.rules) d.push(r.skipped ? `Rule "${r.rule}": skipped, ${r.skipped}.` : r.empty ? `Rule "${r.rule}": no batches, ${r.empty}.` : `Rule "${r.rule}": ${pl(r.batches, 'batch')} considered, ${r.open} free and allowed.`);
+      for (const [w, v] of Object.entries(x.batches)) if (w !== 'open') d.push(`${pl(v.batches.length, 'batch')} out (${v.students} students): ${B_WHY[w]}. ${v.batches.slice(0, 12).join(', ')}${v.batches.length > 12 ? ' …' : ''}`);
+      for (const [w, n] of Object.entries(x.students)) if (w !== 'booked') d.push(`${pl(n, 'student')} out: ${S_WHY[w]}.`);
+      // main reason: what removed the most students
+      const cand = [...Object.entries(x.batches).filter(([w]) => w !== 'open').map(([w, v]) => [B_WHY[w], v.students]), ...Object.entries(x.students).filter(([w]) => w !== 'booked').map(([w, n]) => [S_WHY[w], n])].sort((a, b) => b[1] - a[1]);
+      const main = x.filled >= x.k ? 'full' : !x.rules.some(r => r.batches) ? 'no rule gave this teacher any batch' : cand.length ? cand[0][0] : 'no free students';
+      add(`${x.day} ${x.shift} · ${x.t}${x.tClass ? ' (' + x.tClass + ')' : ''}`, x.filled >= x.k ? 'ok' : x.filled ? 'warn' : 'fail', `${x.filled} of ${x.k} seats filled${x.filled >= x.k ? '.' : `. Main reason: ${main}.`}`, d);
+    }
+    return L;
+  }
+  const logText = L => L.map(l => `[${l.level.toUpperCase()}] ${l.step}: ${l.text}` + l.detail.map(d => '\n    - ' + d).join('')).join('\n');
+
+  const api = { DAYS, SLOTS, COUNSEL_SHIFTS, activeShifts, defaultRules, defaultSettings, parseTimetable, parseStudents, buildStudents, buildPlan, finalizePlan, validatePlan, assignStudents, workload, makeCtx, hm, addDays, buildLog, logText };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.MCSEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);
