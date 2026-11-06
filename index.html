@@ -884,7 +884,7 @@ dialog form{display:flex;flex-direction:column;height:100%}
       const day = iso(d);
       if (weekEnd && day > weekEnd) { add('warn', sheet, X, `${label} for roll ${roll} is ${day}, after this week; it is not counted.`, 'Check the date.'); return; }
       if (res === 'Absent') { absent++; return; }
-      const by = tm(byRaw); if (S(byRaw) && !by) unknownBy[S(byRaw)] = (unknownBy[S(byRaw)] || 0) + 1;
+      const by = tm(byRaw);
       const k = roll + '|' + day, o = hist.get(k);
       if (o) { if (!o.remarks && remarks) o.remarks = remarks; return; }
       hist.set(k, { roll, date: day, by: by || S(byRaw).toUpperCase(), byRaw: S(byRaw), remarks: S(remarks) });
@@ -919,7 +919,6 @@ dialog form{display:flex;flex-direction:column;height:100%}
         addHist(roll, row[c.date], c.by >= 0 ? row[c.by] : '', c.remarks >= 0 ? row[c.remarks] : '', c.result >= 0 ? normResult(row[c.result]) : 'Done', hSh.name, X, 'Date');
       }
     }
-    for (const [v, n] of Object.entries(unknownBy).sort((a, b) => b[1] - a[1])) add('warn', 'Counselling history', null, `Counsellor "${v}" (${n} counselling${n > 1 ? 's' : ''}) is not a short name or full name in the Teachers section. These counsellings still count.`, `Add ${v} to the Teachers section, or write the teacher's short name.`);
     if (absent) add('info', 'Counselling history', null, `${absent} counselling${absent > 1 ? 's are' : ' is'} marked Absent and not counted.`);
     if (left) add('info', sSh.name, null, `${left} student${left > 1 ? 's are' : ' is'} marked Left and will not be booked.`);
     const students = [...roster.values()];
@@ -928,12 +927,18 @@ dialog form{display:flex;flex-direction:column;height:100%}
     return { ok: true, students, history: [...hist.values()], issues, stats, sheet: sSh.name };
   }
   // data: { students: [...], history: [...] } from readStudentList; extra: saved weekly records [{roll, date, by, remarks}]
-  function buildStudentsV2(data, weekStart, extra) {
-    const m = new Map();
+  // teachers: the Teachers section now; each counsellor in the history is matched to it again, so the upload order does not matter
+  function buildStudentsV2(data, weekStart, extra, teachers) {
+    const m = new Map(), tm = teachers ? teacherMatcher(teachers) : null;
     for (const s of data.students) m.set(s.roll, { ...s, hist: new Map() });
-    const addH = (roll, date, by, remarks) => { const s = m.get(S(roll)); if (!s || !date) return; const o = s.hist.get(date); if (!o) s.hist.set(date, { date, by: S(by), remarks: S(remarks) }); else { if (!o.by && by) o.by = S(by); if (!o.remarks && remarks) o.remarks = S(remarks); } };
-    for (const x of data.history || []) addH(x.roll, x.date, x.by, x.remarks);
-    for (const x of extra || []) addH(x.roll, x.date, x.by, x.remarks);
+    const addH = (roll, date, by, remarks, byRaw) => {
+      const s = m.get(S(roll)); if (!s || !date) return;
+      const raw = S(byRaw || by), code = tm ? tm(raw) : S(by), known = !raw || !tm || !!code, b = code || S(by) || raw.toUpperCase();
+      const o = s.hist.get(date);
+      if (!o) s.hist.set(date, { date, by: b, byRaw: raw, known, remarks: S(remarks) }); else { if (!o.by && b) Object.assign(o, { by: b, byRaw: raw, known }); if (!o.remarks && remarks) o.remarks = S(remarks); }
+    };
+    for (const x of data.history || []) addH(x.roll, x.date, x.by, x.remarks, x.byRaw);
+    for (const x of extra || []) addH(x.roll, x.date, x.by, x.remarks, x.by);
     const wEnd = weekStart ? addDays(weekStart, 6) : '';
     for (const s of m.values()) {
       const all = [...s.hist.values()].sort((a, b) => a.date < b.date ? -1 : 1);
@@ -1024,7 +1029,7 @@ dialog form{display:flex;flex-direction:column;height:100%}
   function fillTeachersTemplate(wb, data) {
     const NAVY = 'FF1F3864', solid = argb => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
     const how = wb.addWorksheet('How to fill');
-    [['Counselling Planner: teachers', 't'], ['One row per teacher. Upload it once on the Set up page; after that, edit teachers in the app.', ''], ['', ''],
+    [['Counselling Planner: teachers', 't'], ['One row per teacher. Upload it on the Set up page, or edit teachers in the app. Uploading this file replaces the whole Teachers section: teachers not in the file are removed.', ''], ['', ''],
       ['Short name (required): the code used in the timetable, for example ARV.', ''], ['Full name, Subject: for the schedule and the reports.', ''],
       ['Batches taught: the batches this teacher teaches, separated by commas.', ''],
       ['Batches to counsel (required for every teacher with a counselling slot): the batches whose students this teacher counsels, separated by commas, for example XA1, XA2.', ''],
@@ -1073,7 +1078,10 @@ dialog form{display:flex;flex-direction:column;height:100%}
     const notTT = Object.keys(T).filter(t => !o.tt.teachers.includes(t) && (T[t].counsel || []).length);
     if (notTT.length) add('info', `${notTT.length} teacher${notTT.length > 1 ? 's' : ''} in the Teachers section ${notTT.length > 1 ? 'are' : 'is'} not in this week’s timetable: ${notTT.join(', ')}.`, 'Teachers section', 'Nothing to do unless they should counsel this week.');
     for (const r of batchTimetable(o.tt, s, o.students).filter(r => r.flag)) add('warn', `Batch ${r.batch}: ${r.flag}`, `Batch timetable, ${r.batch}`, r.fix);
-    for (const i of o.fileIssues || []) if (i.level === 'warn') add('warn', i.msg, `${i.sheet}${i.row ? ' row ' + i.row : ''}`, i.fix);
+    // counsellors in the history that are not in the Teachers section as it is now
+    const unk = {}; for (const x of o.students.values()) for (const hh of x.allHistory || []) if (hh.known === false) unk[hh.byRaw] = (unk[hh.byRaw] || 0) + 1;
+    for (const [v, n] of Object.entries(unk).sort((a, b) => b[1] - a[1])) add('warn', `Counsellor "${v}" (${n} counselling${n > 1 ? 's' : ''}) is not a short name or full name in the Teachers section. These counsellings still count.`, 'Student list, counselling history', `Add ${v} to the Teachers section, or write the teacher's short name in the student list.`);
+    for (const i of o.fileIssues || []) if (i.level === 'warn' && !/^Counsellor "/.test(i.msg)) add('warn', i.msg, `${i.sheet}${i.row ? ' row ' + i.row : ''}`, i.fix);
     if (skip.size) add('info', `Skipped this week: ${[...skip].join(', ')}.`, 'Student list', 'Untick “Skip this week” when the batch code is fixed.');
     return out;
   }
@@ -1538,7 +1546,7 @@ async function onStudents(file) {
   } catch (e) { T('upload_students', { ok: false, size_kb: Math.round(file.size / 1024) }); alert(e.message); }
   busy(false); render();
 }
-function rebuildStudents() { st.students = st.v2 ? E.buildStudentsV2(st.v2, st.settings.weekStart, dbRecs()) : null; }
+function rebuildStudents() { st.students = st.v2 ? E.buildStudentsV2(st.v2, st.settings.weekStart, dbRecs(), st.settings.teachers) : null; }
 // Reads either layout of the room list: "Batch | Building | Room No." columns, and/or the "Building | Floor | Room | Morning | Evening" grid
 async function importRoomList(file) {
   const wb = await readWorkbook(file); const done = new Set(); const s = st.settings; const rooms = s.batchRooms || (s.batchRooms = {});
@@ -1586,24 +1594,6 @@ async function importRecords(file) {
   for (const x of list) { const L = st.db.weeks[x.week] || (st.db.weeks[x.week] = []); if (!L.some(y => y.roll === x.roll && y.date === x.date)) L.push(x); }
   await saveDb(); rebuildStudents(); changed(); toast(`${list.length} records imported`);
 }
-async function importTeachers(file) {
-  const wb = await readWorkbook(file); let n = 0;
-  for (const name of wb.SheetNames) {
-    const rows = rowsOf(wb.Sheets[name]);
-    for (let r = 0; r < Math.min(rows.length, 5); r++) {
-      const h = (rows[r] || []).map(v => String(v || '').trim().toLowerCase());
-      const ci = h.findIndex(x => x.includes('short')), ni = h.findIndex(x => x.includes('full name') || x === 'name' || x === 'teacher name');
-      if (ci < 0 || ni < 0) continue;
-      const si = h.findIndex(x => x.includes('sub dep') || x === 'subject'), ki = h.findIndex(x => x === 'class');
-      for (let i = r + 1; i < rows.length; i++) {
-        const row = rows[i] || []; const code = String(row[ci] || '').trim(); if (!code) continue; const old = st.settings.teachers[code] || {};
-        st.settings.teachers[code] = { name: String(row[ni] || old.name || '').trim(), subject: si >= 0 ? String(row[si] || old.subject || '').trim() : (old.subject || ''), cls: ki >= 0 && row[ki] ? String(row[ki]).trim() : (old.cls || '') }; n++;
-      }
-      break;
-    }
-  }
-  changed(); toast(n ? `${n} teachers imported` : 'No Short Code and Full Name columns found');
-}
 
 /* ---------- calculation ---------- */
 function resetSchedule() { st.plan = null; st.result = null; st.moves = []; st.planWarnings = []; }
@@ -1635,7 +1625,8 @@ function restoreEdits() {
   try { const e = JSON.parse(localStorage.getItem(EDITKEY) || 'null');
     if (e && e.week === st.settings.weekStart && e.plan && st.tt && st.students) { st.plan = e.plan; st.moves = e.moves || []; st.planWarnings = e.planWarnings || []; st.excluded = new Set(e.excluded || []); st.keep = e.keep || {}; assign(); } } catch (x) {}
 }
-function changed(redraw = true) { saveSettings(); if (st.plan) { st.keep = {}; assign(); persistEdits(); } if (redraw) render(); }
+let _tKey = '';
+function changed(redraw = true) { saveSettings(); const tk = JSON.stringify(Object.entries(st.settings.teachers).map(([c, t]) => [c, t.name])); if (tk !== _tKey) { _tKey = tk; rebuildStudents(); } if (st.plan) { st.keep = {}; assign(); persistEdits(); } if (redraw) render(); }
 
 /* ---------- render ---------- */
 function render() {
@@ -1747,10 +1738,14 @@ const batchList = v => [...new Set(String(v || '').split(/[,;\/\n+]+/).map(x => 
 async function importTeachers(file) {
   const wb = await readWorkbook(file), p = E.readTeachers(wb.SheetNames.map(n => ({ name: n, rows: rowsOf(wb.Sheets[n]) })));
   if (!p.ok) { alert(p.fatal); return; }
-  const n = Object.keys(p.teachers).length, had = Object.values(st.settings.teachers).filter(t => (t.counsel || []).length).length;
-  if (had && !confirm(`Replace the details of the ${n} teachers in this file? Teachers not in the file stay as they are.`)) return;
-  for (const [c, t] of Object.entries(p.teachers)) st.settings.teachers[c] = { ...(st.settings.teachers[c] || {}), ...t, name: t.name || (st.settings.teachers[c] || {}).name || '', subject: t.subject || (st.settings.teachers[c] || {}).subject || '' };
-  T('upload_teachers', { ok: true, teachers: n }); changed(); toast(`${n} teachers loaded`);
+  const old = st.settings.teachers, codes = Object.keys(p.teachers), n = codes.length;
+  const added = codes.filter(c => !old[c]), updated = codes.filter(c => old[c]), removed = Object.keys(old).filter(c => !p.teachers[c]).sort(nat);
+  const list = a => a.slice(0, 20).join(', ') + (a.length > 20 ? ` and ${a.length - 20} more` : '');
+  if (Object.keys(old).length && !confirm(`The Teachers section will become exactly the ${n} teachers in this file.\n\n${added.length} new, ${updated.length} updated, ${removed.length} removed${removed.length ? ':\n' + list(removed) : '.'}\n\nContinue?`)) return;
+  const next = {};
+  for (const [c, t] of Object.entries(p.teachers)) next[c] = { ...(old[c] || {}), ...t, name: t.name || (old[c] || {}).name || '', subject: t.subject || (old[c] || {}).subject || '' };
+  st.settings.teachers = next;
+  T('upload_teachers', { ok: true, teachers: n, added: added.length, removed: removed.length }); changed(); toast(`${n} teachers loaded${removed.length ? `, ${removed.length} removed` : ''}`);
   if (p.issues.length) alert(p.issues.map(i => `Row ${i.row}: ${i.msg}`).join('\n'));
 }
 async function downloadTeachers() {
@@ -1932,7 +1927,7 @@ function viewSetup() {
   + `<div class="setup"><nav class="toc" aria-label="On this page"><ul>${nav.map(([id, l]) => `<li><a href="#${id}">${l}</a></li>`).join('')}</ul></nav><div class="setup-body">
     <div class="group" id="sec-files"><h2 class="gh">Files</h2><p class="gd">A new faculty timetable each week. The student list only when it changes.</p>${viewUpload()}</div>
     <div class="group" id="sec-checks"><h2 class="gh">Checks</h2><p class="gd">Everything the planner needs is checked first. Problems in red keep the schedule locked; each one says where it is and how to fix it.</p>${viewChecks()}</div>
-    <div class="group" id="sec-teachers"><h2 class="gh">Teachers <span class="badge">${nT} with batches to counsel</span></h2><p class="gd">Set once, then edit here: add, change or delete a teacher. “Batches to counsel” decides whose students each teacher gets. Senior teachers’ slots are never moved.</p>${viewTeachers()}</div>
+    <div class="group" id="sec-teachers"><h2 class="gh">Teachers <span class="badge">${nT} with batches to counsel</span></h2><p class="gd">Set once, then edit here: add, change or delete a teacher. Uploading a Teachers file replaces the whole list, so keep one master file. “Batches to counsel” decides whose students each teacher gets. Senior teachers’ slots are never moved.</p>${viewTeachers()}</div>
     <div class="group" id="sec-btt"><h2 class="gh">Batch timetable</h2><p class="gd">Which batch has class at what time. Morning students are counselled only in evening periods, evening students only in morning periods, and never while their batch has class.</p>${viewBatchTT()}</div>
     <details class="group" id="sec-adv"><summary class="gh" style="cursor:pointer">Advanced settings</summary><p class="gd">Cabins, periods, seats per slot, buildings and backup. Set once.</p>${viewWeek()}<div style="height:18px"></div>${viewRules()}</details>
     <div class="calcbar card"><div><b>${ok ? 'Ready to calculate' : 'Almost ready'}</b><span class="muted">${ok ? 'The schedule opens on the Weekly schedule page.' : 'Still to do: ' + todo.join(', ') + '.'}</span></div>

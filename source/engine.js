@@ -512,7 +512,7 @@
       const day = iso(d);
       if (weekEnd && day > weekEnd) { add('warn', sheet, X, `${label} for roll ${roll} is ${day}, after this week; it is not counted.`, 'Check the date.'); return; }
       if (res === 'Absent') { absent++; return; }
-      const by = tm(byRaw); if (S(byRaw) && !by) unknownBy[S(byRaw)] = (unknownBy[S(byRaw)] || 0) + 1;
+      const by = tm(byRaw);
       const k = roll + '|' + day, o = hist.get(k);
       if (o) { if (!o.remarks && remarks) o.remarks = remarks; return; }
       hist.set(k, { roll, date: day, by: by || S(byRaw).toUpperCase(), byRaw: S(byRaw), remarks: S(remarks) });
@@ -547,7 +547,6 @@
         addHist(roll, row[c.date], c.by >= 0 ? row[c.by] : '', c.remarks >= 0 ? row[c.remarks] : '', c.result >= 0 ? normResult(row[c.result]) : 'Done', hSh.name, X, 'Date');
       }
     }
-    for (const [v, n] of Object.entries(unknownBy).sort((a, b) => b[1] - a[1])) add('warn', 'Counselling history', null, `Counsellor "${v}" (${n} counselling${n > 1 ? 's' : ''}) is not a short name or full name in the Teachers section. These counsellings still count.`, `Add ${v} to the Teachers section, or write the teacher's short name.`);
     if (absent) add('info', 'Counselling history', null, `${absent} counselling${absent > 1 ? 's are' : ' is'} marked Absent and not counted.`);
     if (left) add('info', sSh.name, null, `${left} student${left > 1 ? 's are' : ' is'} marked Left and will not be booked.`);
     const students = [...roster.values()];
@@ -556,12 +555,18 @@
     return { ok: true, students, history: [...hist.values()], issues, stats, sheet: sSh.name };
   }
   // data: { students: [...], history: [...] } from readStudentList; extra: saved weekly records [{roll, date, by, remarks}]
-  function buildStudentsV2(data, weekStart, extra) {
-    const m = new Map();
+  // teachers: the Teachers section now; each counsellor in the history is matched to it again, so the upload order does not matter
+  function buildStudentsV2(data, weekStart, extra, teachers) {
+    const m = new Map(), tm = teachers ? teacherMatcher(teachers) : null;
     for (const s of data.students) m.set(s.roll, { ...s, hist: new Map() });
-    const addH = (roll, date, by, remarks) => { const s = m.get(S(roll)); if (!s || !date) return; const o = s.hist.get(date); if (!o) s.hist.set(date, { date, by: S(by), remarks: S(remarks) }); else { if (!o.by && by) o.by = S(by); if (!o.remarks && remarks) o.remarks = S(remarks); } };
-    for (const x of data.history || []) addH(x.roll, x.date, x.by, x.remarks);
-    for (const x of extra || []) addH(x.roll, x.date, x.by, x.remarks);
+    const addH = (roll, date, by, remarks, byRaw) => {
+      const s = m.get(S(roll)); if (!s || !date) return;
+      const raw = S(byRaw || by), code = tm ? tm(raw) : S(by), known = !raw || !tm || !!code, b = code || S(by) || raw.toUpperCase();
+      const o = s.hist.get(date);
+      if (!o) s.hist.set(date, { date, by: b, byRaw: raw, known, remarks: S(remarks) }); else { if (!o.by && b) Object.assign(o, { by: b, byRaw: raw, known }); if (!o.remarks && remarks) o.remarks = S(remarks); }
+    };
+    for (const x of data.history || []) addH(x.roll, x.date, x.by, x.remarks, x.byRaw);
+    for (const x of extra || []) addH(x.roll, x.date, x.by, x.remarks, x.by);
     const wEnd = weekStart ? addDays(weekStart, 6) : '';
     for (const s of m.values()) {
       const all = [...s.hist.values()].sort((a, b) => a.date < b.date ? -1 : 1);
@@ -652,7 +657,7 @@
   function fillTeachersTemplate(wb, data) {
     const NAVY = 'FF1F3864', solid = argb => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
     const how = wb.addWorksheet('How to fill');
-    [['Counselling Planner: teachers', 't'], ['One row per teacher. Upload it once on the Set up page; after that, edit teachers in the app.', ''], ['', ''],
+    [['Counselling Planner: teachers', 't'], ['One row per teacher. Upload it on the Set up page, or edit teachers in the app. Uploading this file replaces the whole Teachers section: teachers not in the file are removed.', ''], ['', ''],
       ['Short name (required): the code used in the timetable, for example ARV.', ''], ['Full name, Subject: for the schedule and the reports.', ''],
       ['Batches taught: the batches this teacher teaches, separated by commas.', ''],
       ['Batches to counsel (required for every teacher with a counselling slot): the batches whose students this teacher counsels, separated by commas, for example XA1, XA2.', ''],
@@ -701,7 +706,10 @@
     const notTT = Object.keys(T).filter(t => !o.tt.teachers.includes(t) && (T[t].counsel || []).length);
     if (notTT.length) add('info', `${notTT.length} teacher${notTT.length > 1 ? 's' : ''} in the Teachers section ${notTT.length > 1 ? 'are' : 'is'} not in this week’s timetable: ${notTT.join(', ')}.`, 'Teachers section', 'Nothing to do unless they should counsel this week.');
     for (const r of batchTimetable(o.tt, s, o.students).filter(r => r.flag)) add('warn', `Batch ${r.batch}: ${r.flag}`, `Batch timetable, ${r.batch}`, r.fix);
-    for (const i of o.fileIssues || []) if (i.level === 'warn') add('warn', i.msg, `${i.sheet}${i.row ? ' row ' + i.row : ''}`, i.fix);
+    // counsellors in the history that are not in the Teachers section as it is now
+    const unk = {}; for (const x of o.students.values()) for (const hh of x.allHistory || []) if (hh.known === false) unk[hh.byRaw] = (unk[hh.byRaw] || 0) + 1;
+    for (const [v, n] of Object.entries(unk).sort((a, b) => b[1] - a[1])) add('warn', `Counsellor "${v}" (${n} counselling${n > 1 ? 's' : ''}) is not a short name or full name in the Teachers section. These counsellings still count.`, 'Student list, counselling history', `Add ${v} to the Teachers section, or write the teacher's short name in the student list.`);
+    for (const i of o.fileIssues || []) if (i.level === 'warn' && !/^Counsellor "/.test(i.msg)) add('warn', i.msg, `${i.sheet}${i.row ? ' row ' + i.row : ''}`, i.fix);
     if (skip.size) add('info', `Skipped this week: ${[...skip].join(', ')}.`, 'Student list', 'Untick “Skip this week” when the batch code is fixed.');
     return out;
   }
