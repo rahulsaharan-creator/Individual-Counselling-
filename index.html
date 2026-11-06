@@ -406,7 +406,6 @@ dialog form{display:flex;flex-direction:column;height:100%}
       classGroups: '11th, FTP | 12th | Target',
       strictClass: true,
       onceRound: true,
-      roundTopUp: false,
       protectSenior: true,
       seniorClasses: '12th, Target',
       moveOverflow: true,
@@ -714,37 +713,25 @@ dialog form{display:flex;flex-direction:column;height:100%}
     // students only meet a teacher of their own class group (11th with 11th and FTP, 12th with 12th, Target with Target by default)
     const classOk = (b, t) => settings.strictClass === false || !tcls(t) || !batchCls[b] || groupOf(tcls(t)) === groupOf(batchCls[b]);
     const placeOk = (b, p) => ctx.siteOfBatch(b) === p.site;
-    // rounds: nobody is counselled again until every student who can be reached this week has been counselled as often
+    // Rule order, so no two rules fight:
+    //  1. Must hold (never broken): the student is free (no class then; opposite shift if that is on), same campus,
+    //     same class group (if strict), allowed by at least one matching rule, booked once a week, the minimum gap.
+    //  2. Preferences, in this order: due this round (counted inside each class group) > has not met this teacher >
+    //     earlier matching rule (e.g. "Teaches the batch") > counselled longest ago.
+    //  Seats are filled in passes: pass 1 keeps every preference as a rule; pass 2 lets in students already counselled
+    //  this round; pass 3 lets in students who met this teacher before. So a seat stays empty only when no free student
+    //  of that class group is left. Within a pass the slots with the fewest candidates pick first, one seat at a time.
+    const gOfB = b => batchCls[b] ? groupOf(batchCls[b]) : 'none';
     const reachable = allB.filter(b => plan.some(p => freeAt(b, p.day, p.shift) && placeOk(b, p)));
     const activeStu = reachable.flatMap(b => byBatch.get(b) || []);
     const minTimes = activeStu.length ? Math.min(...activeStu.map(s => s.times)) : 0;
-    const roundOn = settings.onceRound !== false; let roundGate = true;
+    const minBy = {}; for (const s of activeStu) { const g = gOfB(s.batch); minBy[g] = Math.min(minBy[g] === undefined ? Infinity : minBy[g], s.times); }
+    const due = s => s.times <= (minBy[gOfB(s.batch)] === undefined ? minTimes : minBy[gOfB(s.batch)]);
+    const roundOn = settings.onceRound !== false;
     // trace: for every slot, why each batch and each student was left out (first reason wins)
     const trace = {};
     const tr = pid => trace[pid] || (trace[pid] = { rules: [], batch: new Map(), stu: new Map() });
     const note = (m, key, why) => { if (!m.has(key)) m.set(key, why); };
-    function fill(p, batches, basis) {
-      const pool = []; const T = tr(p.id); const R = { rule: basis, batches: batches.length, open: 0 }; T.rules.push(R);
-      for (const b of batches) {
-        const nStu = (byBatch.get(b) || []).length;
-        if (!ctx.occ.has(b)) { note(T.batch, b, ['noTimetable', nStu]); continue; }
-        if (ctx.occ.get(b).has(p.day + '|' + p.shift)) { note(T.batch, b, ['inClass', nStu]); continue; }
-        if (opposite && classShifts.get(b).has(p.shift[0])) { note(T.batch, b, ['sameShift', nStu]); continue; }
-        if (!placeOk(b, p)) { note(T.batch, b, ['campus', nStu]); continue; }
-        if (!classOk(b, p.t)) { classSkips++; note(T.batch, b, ['classGroup', nStu]); continue; }
-        R.open++; T.batch.set(b, ['open', nStu]);
-        for (const s of (byBatch.get(b) || [])) pool.push(s);
-      }
-      pool.sort((a, b) => a.times - b.times || ((a.last || '') < (b.last || '') ? -1 : (a.last || '') > (b.last || '') ? 1 : a.batch < b.batch ? -1 : a.batch > b.batch ? 1 : a.roll < b.roll ? -1 : 1));
-      for (const s of pool) {
-        if ((count.get(p.id) || 0) >= p.k) { note(T.stu, s.roll, 'seatsFull'); continue; }
-        if (used.has(s.roll)) { note(T.stu, s.roll, 'bookedElsewhere'); continue; }
-        if (roundOn && roundGate && s.times > minTimes) { roundSkips++; note(T.stu, s.roll, 'round'); continue; }
-        if (gapCut && s.last && s.last >= gapCut) { gapSkips++; note(T.stu, s.roll, 'gap'); continue; }
-        if (settings.noRepeatTeacher && s.teachersSeen.has(p.t)) { repeatSkips++; note(T.stu, s.roll, 'repeat'); continue; }
-        used.add(s.roll); count.set(p.id, (count.get(p.id) || 0) + 1); assign.push({ pid: p.id, s, basis }); T.stu.set(s.roll, 'booked');
-      }
-    }
     const tMatch = (r, t) => {
       const v = list(r.tValue);
       if (r.tType === 'class') return v.includes(tcls(t));
@@ -767,25 +754,65 @@ dialog form{display:flex;flex-direction:column;height:100%}
     const rules = (settings.rules && settings.rules.length ? settings.rules : defaultRules()).filter(r => r.on);
     if (keep) for (const p of plan) for (const [roll, basis] of (keep[p.id] || [])) {
       const s = students.get(roll); if (!s || used.has(roll) || (count.get(p.id) || 0) >= p.k) continue;
-      used.add(roll); count.set(p.id, (count.get(p.id) || 0) + 1); assign.push({ pid: p.id, s, basis: basis || 'Kept' });
+      used.add(roll); count.set(p.id, (count.get(p.id) || 0) + 1); assign.push({ pid: p.id, s, basis: basis || 'Kept' }); tr(p.id).stu.set(roll, 'booked');
     }
     const ruleMiss = (r, t) => r.sType === 'taught' ? `${t} teaches no batch that is in the student file`
       : r.sType === 'group' ? (tcls(t) ? `no batch of ${t}'s class group (${tcls(t)}) is in both the student file and the timetable` : `${t} has no class set in the teacher list`)
       : 'no batch in the student file matches this rule';
-    for (const r of rules) for (const p of plan) {
-      if (!tMatch(r, p.t)) { tr(p.id).rules.push({ rule: r.name || 'Rule', skipped: 'this rule does not apply to this teacher' }); continue; }
-      const b = pool(r, p.t); if (!b.length) { tr(p.id).rules.push({ rule: r.name || 'Rule', batches: 0, open: 0, empty: ruleMiss(r, p.t) }); continue; }
-      fill(p, b, r.name || 'Rule');
-    }
-    // optional second pass: seats still empty go to the students counselled longest ago
-    if (roundOn && settings.roundTopUp) { roundGate = false; for (const r of rules) for (const p of plan) if (tMatch(r, p.t)) fill(p, pool(r, p.t), (r.name || 'Rule') + ' (empty seat)'); }
+    // candidates per slot: the union of every matching rule's batches that pass the must-hold checks
+    const cand = plan.map(p => {
+      const T = tr(p.id), firstRule = new Map();
+      rules.forEach((r, ri) => {
+        const name = r.name || 'Rule';
+        if (!tMatch(r, p.t)) { T.rules.push({ rule: name, skipped: 'this rule does not apply to this teacher' }); return; }
+        const bs = pool(r, p.t); if (!bs.length) { T.rules.push({ rule: name, batches: 0, open: 0, empty: ruleMiss(r, p.t) }); return; }
+        const R = { rule: name, batches: bs.length, open: 0 }; T.rules.push(R);
+        for (const b of bs) {
+          const nStu = (byBatch.get(b) || []).length;
+          if (!ctx.occ.has(b)) { note(T.batch, b, ['noTimetable', nStu]); continue; }
+          if (ctx.occ.get(b).has(p.day + '|' + p.shift)) { note(T.batch, b, ['inClass', nStu]); continue; }
+          if (opposite && classShifts.get(b).has(p.shift[0])) { note(T.batch, b, ['sameShift', nStu]); continue; }
+          if (!placeOk(b, p)) { note(T.batch, b, ['campus', nStu]); continue; }
+          if (!classOk(b, p.t)) { classSkips++; note(T.batch, b, ['classGroup', nStu]); continue; }
+          R.open++; T.batch.set(b, ['open', nStu]); if (!firstRule.has(b)) firstRule.set(b, [ri, name]);
+        }
+      });
+      const cl = [];
+      for (const [b, [ri, name]] of firstRule) for (const s of byBatch.get(b) || []) {
+        if (gapCut && s.last && s.last >= gapCut) { gapSkips++; note(T.stu, s.roll, 'gap'); continue; }
+        cl.push({ s, ri, name, met: s.teachersSeen.has(p.t) ? 1 : 0 });
+      }
+      const dueKey = c => roundOn ? (due(c.s) ? 0 : 1) : 0;
+      cl.sort((a, b) => dueKey(a) - dueKey(b) || (roundOn ? a.s.times - b.s.times : 0) || a.met - b.met || a.ri - b.ri || ((a.s.last || '') < (b.s.last || '') ? -1 : (a.s.last || '') > (b.s.last || '') ? 1 : a.s.roll < b.s.roll ? -1 : 1));
+      return { p, list: cl };
+    });
+    const passes = [{ round: roundOn, repeat: !!settings.noRepeatTeacher, tag: '' }];
+    if (roundOn) passes.push({ round: false, repeat: !!settings.noRepeatTeacher, tag: 'already counselled this round' });
+    if (settings.noRepeatTeacher) passes.push({ round: false, repeat: false, tag: 'met this teacher before' });
+    const passCount = passes.map(() => 0);
+    passes.forEach((ps, pi) => {
+      const ok = c => !used.has(c.s.roll) && !(ps.round && !due(c.s)) && !(ps.repeat && c.met);
+      if (pi === 0) for (const x of cand) for (const c of x.list) if (!used.has(c.s.roll)) { if (ps.round && !due(c.s)) roundSkips++; else if (ps.repeat && c.met) repeatSkips++; }
+      const order = cand.filter(x => (count.get(x.p.id) || 0) < x.p.k).map(x => [x, x.list.filter(ok).length]).sort((a, b) => a[1] - b[1]).map(a => a[0]);
+      for (let progress = true; progress;) {
+        progress = false;
+        for (const x of order) {
+          if ((count.get(x.p.id) || 0) >= x.p.k) continue;
+          const c = x.list.find(ok); if (!c) continue;
+          used.add(c.s.roll); count.set(x.p.id, (count.get(x.p.id) || 0) + 1); passCount[pi]++; progress = true;
+          assign.push({ pid: x.p.id, s: c.s, basis: c.name + (ps.tag ? ` (${ps.tag})` : '') }); tr(x.p.id).stu.set(c.s.roll, 'booked');
+        }
+      }
+    });
+    // why the rest of each slot's candidates were not booked there
+    for (const x of cand) { const T = tr(x.p.id); for (const c of x.list) if (!T.stu.has(c.s.roll)) T.stu.set(c.s.roll, (count.get(x.p.id) || 0) >= x.p.k ? 'seatsFull' : 'bookedElsewhere'); }
     // times
     const byP = {}; assign.forEach(a => (byP[a.pid] = byP[a.pid] || []).push(a));
     const pm = Object.fromEntries(plan.map(p => [p.id, p]));
     const rows = [];
     for (const pid in byP) byP[pid].sort((a, b) => a.s.roll < b.s.roll ? -1 : 1).forEach((a, i) => { const p = pm[pid]; rows.push({ ...a, p, time: hm(p.start + p.unit * i), batchShift: shiftOf(a.s.batch) }); });
     rows.sort((a, b) => cmp([DAYS.indexOf(a.p.day), SLOTS.indexOf(a.p.shift), a.p.cabin, a.time], [DAYS.indexOf(b.p.day), SLOTS.indexOf(b.p.shift), b.p.cabin, b.time]));
-    const why = ['not enough free students of this class' + (ctx.split ? ' and campus' : '')].concat(settings.noRepeatTeacher ? ['who haven’t met this teacher'] : [], roundOn ? [`and still due this round`] : []).join(' ');
+    const why = 'no free student of this class group' + (ctx.split ? ' on this campus' : '') + ' is left at this time; see the Why tab';
     const short = plan.filter(p => (count.get(p.id) || 0) < p.k).map(p => `${p.t} on ${p.day} ${p.shift}${ctx.split ? ` (${SITE_NAME[p.site]})` : ''}: ${count.get(p.id) || 0} of ${p.k} seats filled (${why}).`);
     const noCls = [...new Set(plan.filter(p => !tcls(p.t)).map(p => p.t))].map(t => `${t} has no class (11th / 12th / Target / FTP) in the teacher list, so only students of batches they teach could be matched.`);
     const ftp = [...new Set(plan.filter(p => ctx.inferredFTP(p.t)).map(p => p.t))];
@@ -794,9 +821,9 @@ dialog form{display:flex;flex-direction:column;height:100%}
     const cov = { active: 0, done: 0, byClass: {} };
     for (const b of allB) for (const s of byBatch.get(b) || []) {
       const c = batchCls[b] || 'Not known', x = cov.byClass[c] || (cov.byClass[c] = { active: 0, done: 0, roundDone: 0 });
-      cov.active++; x.active++; if (s.times > 0) { cov.done++; x.done++; } if (s.times > minTimes) x.roundDone++;
+      cov.active++; x.active++; if (s.times > 0) { cov.done++; x.done++; } if (!due(s)) x.roundDone++;
     }
-    cov.round = minTimes + 1; cov.roundDone = activeStu.filter(s => s.times > minTimes).length; cov.reachable = activeStu.length;
+    cov.round = minTimes + 1; cov.roundDone = activeStu.filter(s => !due(s)).length; cov.byGroup = Object.fromEntries(Object.entries(minBy).map(([g, m]) => [g === 'none' ? 'No class' : g[0] === 'g' ? groups[+g.slice(1)].join(' + ') : g.slice(4), m + 1])); cov.reachable = activeStu.length;
     const slotLog = plan.map(p => {
       const T = trace[p.id] || { rules: [], batch: new Map(), stu: new Map() };
       const bz = {}, sz = {};
@@ -804,7 +831,7 @@ dialog form{display:flex;flex-direction:column;height:100%}
       for (const why of T.stu.values()) sz[why] = (sz[why] || 0) + 1;
       return { id: p.id, t: p.t, tClass: tcls(p.t) || '', day: p.day, shift: p.shift, site: p.site, cabin: p.cabin, k: p.k, filled: count.get(p.id) || 0, rules: T.rules, batches: bz, students: sz };
     });
-    return { rows, repeatSkips, gapSkips, roundSkips, classSkips, minTimes, coverage: cov, batchCls, warnings: [...ftpNote, ...noCls, ...short], counts: Object.fromEntries(plan.map(p => [p.id, count.get(p.id) || 0])), slotLog, allB, studentBatches: [...byBatch.keys()], byBatchSize: Object.fromEntries([...byBatch].map(([b, a]) => [b, a.length])) };
+    return { rows, repeatSkips, gapSkips, roundSkips, classSkips, minTimes, coverage: cov, batchCls, warnings: [...ftpNote, ...noCls, ...short], counts: Object.fromEntries(plan.map(p => [p.id, count.get(p.id) || 0])), passes: passes.map((ps, i) => ({ tag: ps.tag, booked: passCount[i] })), minBy, slotLog, allB, studentBatches: [...byBatch.keys()], byBatchSize: Object.fromEntries([...byBatch].map(([b, a]) => [b, a.length])) };
   }
 
   /* ---------- the "why" log: every step from files to bookings, in plain words ---------- */
@@ -817,9 +844,7 @@ dialog form{display:flex;flex-direction:column;height:100%}
   };
   const S_WHY = {
     bookedElsewhere: 'already booked with another teacher this week',
-    round: 'already counselled this round (Rounds is on)',
     gap: 'counselled too recently (Minimum gap)',
-    repeat: 'has met this teacher before (No repeat teacher is on)',
     seatsFull: 'slot was already full'
   };
   // level: ok | warn | fail
@@ -860,11 +885,12 @@ dialog form{display:flex;flex-direction:column;height:100%}
     const c = result.coverage;
     if (settings.onceRound !== false) {
       const due = c.reachable - c.roundDone;
-      add('Rounds', due < c.reachable / 2 ? 'warn' : 'ok', `Round ${c.round}: only students counselled ${result.minTimes} time${result.minTimes === 1 ? '' : 's'} can be booked. ${due} of ${c.reachable} reachable students are still due; ${c.roundDone} are held back until the round ends.${settings.roundTopUp ? '' : ' "Fill empty seats" is off, so their seats stay empty.'}`);
+      add('Rounds', 'ok', `Rounds are counted inside each class group: ${Object.entries(c.byGroup || {}).map(([g, n]) => `${g} round ${n}`).join(', ')}. ${due} of ${c.reachable} reachable students are due this round and go first; others fill seats only when no due student is free.`);
     }
     // 6 per slot
     const booked = result.rows.length, cap = plan.reduce((a, p) => a + p.k, 0);
-    add('Matching', booked ? (booked < cap ? 'warn' : 'ok') : 'fail', `${booked} of ${cap} seats filled. Rejections: ${result.roundSkips} by Rounds, ${result.repeatSkips} by No repeat teacher, ${result.gapSkips} by Minimum gap, ${result.classSkips} batch checks by Strict class matching.`);
+    const P = result.passes || [];
+    add('Matching', booked ? (booked < cap ? 'warn' : 'ok') : 'fail', `${booked} of ${cap} seats filled.${P.length ? ` ${P[0].booked} with students due this round who have not met the teacher` + P.slice(1).map(x => `, ${x.booked} with students ${x.tag}`).join('') + '.' : ''}${result.gapSkips ? ` ${result.gapSkips} candidate places skipped by the minimum gap.` : ''}`);
     for (const x of result.slotLog) {
       const d = [];
       for (const r of x.rules) d.push(r.skipped ? `Rule "${r.rule}": skipped, ${r.skipped}.` : r.empty ? `Rule "${r.rule}": no batches, ${r.empty}.` : `Rule "${r.rule}": ${pl(r.batches, 'batch')} considered, ${r.open} free and allowed.`);
@@ -872,7 +898,7 @@ dialog form{display:flex;flex-direction:column;height:100%}
       for (const [w, n] of Object.entries(x.students)) if (w !== 'booked') d.push(`${pl(n, 'student')} out: ${S_WHY[w]}.`);
       // main reason: what removed the most students
       const cand = [...Object.entries(x.batches).filter(([w]) => w !== 'open').map(([w, v]) => [B_WHY[w], v.students]), ...Object.entries(x.students).filter(([w]) => w !== 'booked').map(([w, n]) => [S_WHY[w], n])].sort((a, b) => b[1] - a[1]);
-      const main = x.filled >= x.k ? 'full' : !x.rules.some(r => r.batches) ? 'no rule gave this teacher any batch' : cand.length ? cand[0][0] : 'no free students';
+      const main = x.filled >= x.k ? 'full' : !x.rules.some(r => r.batches) ? 'no rule gave this teacher any batch' : !Object.keys(x.batches).includes('open') ? `no batch is free at this time (${cand.length ? cand[0][0] : 'none'})` : 'every free student of this class group is already booked in another slot this week';
       add(`${x.day} ${x.shift} · ${x.t}${x.tClass ? ' (' + x.tClass + ')' : ''}`, x.filled >= x.k ? 'ok' : x.filled ? 'warn' : 'fail', `${x.filled} of ${x.k} seats filled${x.filled >= x.k ? '.' : `. Main reason: ${main}.`}`, d);
     }
     return L;
@@ -1176,12 +1202,11 @@ function viewRules() {
         <button class="btn ghost icon-btn danger" type="button" data-rdel="${i}" aria-label="Delete rule">${ICON.del}</button></div></div>`).join('')}</div>
     <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button class="btn" type="button" id="addRule">${ICON.plus}Add rule</button><button class="btn ghost" type="button" id="resetRules">Restore default rules</button></div>`;
   const cons = `<div class="optline">${toggle('optOpp', s.oppositeShiftOnly !== false, 'Counsel students only in the opposite shift')}<div><b>Only in the opposite shift</b><span class="muted">Morning batches are counselled in evening periods and evening batches in morning periods. Turn off to also use free periods inside a batch’s own shift.</span></div></div>
-    <div class="optline">${toggle('optRepeat', s.noRepeatTeacher, 'Always a different teacher')}<div><b>Always a different teacher</b><span class="muted">Skip students this teacher has counselled before.</span></div></div>
+    <div class="optline">${toggle('optRepeat', s.noRepeatTeacher, 'Prefer a different teacher')}<div><b>Prefer a different teacher</b><span class="muted">Students who have not met this teacher go first. Someone who has met them is booked only when that would otherwise leave a seat empty.</span></div></div>
     <div class="optline">${toggle('optMove', s.moveOverflow, 'Move slots when cabins are full')}<div><b>Move slots when cabins are full</b><span class="muted">Same day first, then the nearest day, only where the teacher has no class.</span></div></div>
     <div class="optline">${toggle('optSenior', s.protectSenior !== false, 'Never move senior faculty')}<div><b>Never move senior faculty</b><span class="muted">When cabins are full, only other teachers are moved. Senior faculty are teachers of these classes:</span><input class="input sm" id="senior" value="${esc(s.seniorClasses || '')}" style="width:160px;margin-top:6px" aria-label="Senior faculty classes"></div></div>
     <div class="optline">${toggle('optStrict', s.strictClass !== false, 'Students only with a teacher of their class')}<div><b>Students only with a teacher of their class</b><span class="muted">Uses “Teacher classes that share students” below. By default 11th students meet 11th and FTP teachers, 12th students meet 12th teachers and Target students meet Target teachers. Applies to every rule.</span></div></div>
-    <div class="optline">${toggle('optRound', s.onceRound !== false, 'Every student once before anyone again')}<div><b>Every student once before anyone again</b><span class="muted">A student is booked again only when every student in this week’s batches has been counselled as many times. Counts the student file and the saved weekly records.</span></div></div>
-    <div class="optline">${toggle('optTopUp', !!s.roundTopUp, 'Fill seats the round rule leaves empty', s.onceRound !== false ? '' : 'disabled')}<div><b>Fill seats the round rule leaves empty</b><span class="muted">Off: a seat stays empty rather than repeat a student. On: it goes to the student counselled longest ago.</span></div></div>
+    <div class="optline">${toggle('optRound', s.onceRound !== false, 'Students due this round go first')}<div><b>Students due this round go first</b><span class="muted">Rounds are counted inside each class group, so 11th, 12th and Target move at their own pace. Students counselled fewer times always go first. A student already counselled this round fills a seat only when no due student is free, so no seat is left empty. Counts the student file and the saved weekly records.</span></div></div>
     <div class="optline"><input class="input sm" type="number" min="0" max="365" id="gap" value="${s.minGapDays || 0}" style="width:76px" aria-label="Minimum days between counselling"><div><b>Days before a student can be counselled again</b><span class="muted">0 means no limit. Students counselled more recently are skipped.</span></div></div>
     <div class="optline" style="display:block"><label class="f" for="cg">Teacher classes that share students</label><input class="input" id="cg" value="${esc(s.classGroups)}" style="width:min(380px,100%)"><div class="muted" style="font-size:13.5px;margin-top:4px">Separate groups with |. Used by “students of the same class group” and “Students only with a teacher of their class”. FTP is for new teachers, who counsel 11th students.</div></div>
     <div class="optline" style="display:block"><label class="f" for="kw">Word that marks a counselling cell in the timetable</label><input class="input" id="kw" value="${esc(s.keyword)}" style="width:220px"></div>`;
@@ -1208,7 +1233,7 @@ function viewRules() {
     <datalist id="bldList">${s.knownBuildings.concat(['M3 old']).map(b => `<option value="${esc(b)}">`).join('')}</datalist>`;
   const backup = `<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" type="button" id="expSet">Export settings</button>
     <label class="btn" style="cursor:pointer">Import settings<input type="file" accept=".json" id="impSet" class="hide"></label><button class="btn danger" type="button" id="resetSet">Reset everything to defaults</button></div>`;
-  return `<div class="card">${section('Matching rules', ['Rules run from top to bottom. Each one fills the seats that are still empty in the matching teachers’ slots.', 'A student is only placed when they have no class then (by default, only in the shift opposite to their classes), and is booked once a week.'], rules, 'rules')}
+  return `<div class="card">${section('Matching rules', ['Rules decide which batches a teacher may get. A batch allowed by any rule can be booked; a higher rule only breaks ties.', 'Always true: the student has no class then (by default, only in the shift opposite to their classes), is on the same campus and the same class group, and is booked once a week.', 'Then, in this order: students due this round, students who have not met the teacher, the higher rule, the student counselled longest ago. Slots with the fewest free students choose first, so every teacher gets students when any are free.'], rules, 'rules')}
     ${section('Matching limits', 'These apply to every rule.', cons, 'sec-limits')}
     ${section('Student count by building', ['Each slot starts with the students-per-slot number.', 'It loses 1 for each neighbouring class held in one of these buildings, because the teacher needs time to walk over.'], red, 'sec-building')}
     ${section(`Teachers <span class="badge">${tRows.length}</span>`, ['Class decides which students a teacher can get under “same class group” and “teacher of class” rules.', 'FTP = new teachers (Faculty Training Program), who counsel 11th students. A teacher with no class here and no classes in the timetable is treated as FTP.'], teach, 'sec-teachers')}
@@ -1240,7 +1265,7 @@ function viewSchedule() {
   return head('Weekly schedule', 'Select a slot on the board to move it, change its students or remove it. The student list updates straight away.',
     `<button class="btn" type="button" id="addSlot">${ICON.plus}Add slot</button><button class="btn" type="button" id="dlRep">${ICON.dl}Download report</button><button class="btn primary" type="button" id="dl">${ICON.dl}Download Excel</button>`)
   + `<div class="kpis"><div class="kpi"><b>${st.plan.length}</b><span>Counselling slots</span></div><div class="kpi"><b>${r.rows.length}</b><span>Students booked of ${cap} seats</span></div>
-     <div class="kpi"><b>${st.moves.length}</b><span>Slots moved to a free cabin</span></div><div class="kpi"><b>${r.repeatSkips}</b><span>Repeat teachers avoided</span></div></div>
+     <div class="kpi"><b>${st.moves.length}</b><span>Slots moved to a free cabin</span></div><div class="kpi"><b>${r.passes && r.passes[0] ? r.passes[0].booked : r.rows.length}</b><span>Booked from students due this round</span></div></div>
   ${r.rows.length < cap && st.view !== 'why' ? `<div class="notice i">${cap - r.rows.length} seats are empty. <button class="btn sm" type="button" data-view="why">See why</button></div>` : ''}
   ${notes.some(n => n[0] === 'e') ? `<div class="notice e"><b>Fix before sending</b><ul>${notes.filter(n => n[0] === 'e').map(n => `<li>${esc(n[1])}</li>`).join('')}</ul></div>` : ''}
   <div class="tabs" role="tablist">${views.map(([k, l]) => `<button type="button" role="tab" aria-selected="${st.view === k}" class="${st.view === k ? 'on' : ''}" data-view="${k}">${l}</button>`).join('')}</div>
@@ -1331,7 +1356,7 @@ function vDash() {
   <div class="tbl" style="margin-bottom:24px"><table><thead><tr><th>Day</th><th class="num">Slots</th><th class="num">Teachers came</th><th class="num">Late</th><th class="num">Teacher absent</th><th class="num">Students booked</th><th class="num">Present</th><th class="num">Absent</th><th class="num">Not marked</th><th class="num">Parents came</th></tr></thead><tbody>
     ${E.DAYS.filter(d => w.day[d].slots).map(d => dayRow(`<b>${d}</b> <span class="muted">${fmtShort(dayDate(d))}</span>`, w.day[d])).join('')}${dayRow('<b>Week</b>', t, true)}</tbody></table></div>
   <h2 class="gh">All students so far</h2>
-  <p class="muted">Students in this week’s batches, from the student file and the saved weekly records, before this week. Round ${cov.round}: ${cov.roundDone.toLocaleString()} of ${cov.reachable.toLocaleString()} students done. ${st.settings.onceRound !== false ? 'Nobody is booked again until the round is complete.' : 'The round rule is off.'}</p>
+  <p class="muted">Students in this week’s batches, from the student file and the saved weekly records, before this week. ${st.settings.onceRound !== false ? `Rounds by class group: ${Object.entries(cov.byGroup || {}).map(([g, n]) => `${esc(g)} round ${n}`).join(', ')}. ${cov.roundDone.toLocaleString()} of ${cov.reachable.toLocaleString()} students have had their turn this round; the rest go first.` : 'Students due this round are not put first.'}</p>
   <div class="tbl" style="margin-bottom:24px"><table><thead><tr><th>Class</th><th class="num">Students</th><th class="num">Counselled at least once</th><th class="num">Never counselled</th><th>Coverage</th></tr></thead><tbody>
     ${Object.entries(cov.byClass).sort((a, b) => nat(a[0], b[0])).map(([c, x]) => `<tr><td><b>${esc(c)}</b></td><td class="num">${x.active}</td><td class="num">${x.done}</td><td class="num">${x.active - x.done}</td><td>${bar(x.done, x.active)} <span class="muted">${pct(x.done, x.active)}</span></td></tr>`).join('')}
     <tr><td><b>All</b></td><td class="num"><b>${cov.active}</b></td><td class="num"><b>${cov.done}</b></td><td class="num"><b>${cov.active - cov.done}</b></td><td>${bar(cov.done, cov.active)} <span class="muted">${pct(cov.done, cov.active)}</span></td></tr></tbody></table></div>
@@ -1498,7 +1523,6 @@ function bind() {
   on('senior', 'change', e => { st.settings.seniorClasses = e.target.value; changed(false); if (st.plan) toast('Recalculate to apply'); });
   on('optStrict', 'change', e => { st.settings.strictClass = e.target.checked; changed(false); });
   on('optRound', 'change', e => { st.settings.onceRound = e.target.checked; changed(); });
-  on('optTopUp', 'change', e => { st.settings.roundTopUp = e.target.checked; changed(false); });
   on('gap', 'change', e => { st.settings.minGapDays = Math.max(0, +e.target.value || 0); changed(false); });
   on('cg', 'change', e => { st.settings.classGroups = e.target.value; changed(false); });
   on('kw', 'change', e => { st.settings.keyword = e.target.value.trim() || 'Counselling'; changed(); });

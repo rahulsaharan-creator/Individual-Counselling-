@@ -34,7 +34,6 @@
       classGroups: '11th, FTP | 12th | Target',
       strictClass: true,
       onceRound: true,
-      roundTopUp: false,
       protectSenior: true,
       seniorClasses: '12th, Target',
       moveOverflow: true,
@@ -342,37 +341,25 @@
     // students only meet a teacher of their own class group (11th with 11th and FTP, 12th with 12th, Target with Target by default)
     const classOk = (b, t) => settings.strictClass === false || !tcls(t) || !batchCls[b] || groupOf(tcls(t)) === groupOf(batchCls[b]);
     const placeOk = (b, p) => ctx.siteOfBatch(b) === p.site;
-    // rounds: nobody is counselled again until every student who can be reached this week has been counselled as often
+    // Rule order, so no two rules fight:
+    //  1. Must hold (never broken): the student is free (no class then; opposite shift if that is on), same campus,
+    //     same class group (if strict), allowed by at least one matching rule, booked once a week, the minimum gap.
+    //  2. Preferences, in this order: due this round (counted inside each class group) > has not met this teacher >
+    //     earlier matching rule (e.g. "Teaches the batch") > counselled longest ago.
+    //  Seats are filled in passes: pass 1 keeps every preference as a rule; pass 2 lets in students already counselled
+    //  this round; pass 3 lets in students who met this teacher before. So a seat stays empty only when no free student
+    //  of that class group is left. Within a pass the slots with the fewest candidates pick first, one seat at a time.
+    const gOfB = b => batchCls[b] ? groupOf(batchCls[b]) : 'none';
     const reachable = allB.filter(b => plan.some(p => freeAt(b, p.day, p.shift) && placeOk(b, p)));
     const activeStu = reachable.flatMap(b => byBatch.get(b) || []);
     const minTimes = activeStu.length ? Math.min(...activeStu.map(s => s.times)) : 0;
-    const roundOn = settings.onceRound !== false; let roundGate = true;
+    const minBy = {}; for (const s of activeStu) { const g = gOfB(s.batch); minBy[g] = Math.min(minBy[g] === undefined ? Infinity : minBy[g], s.times); }
+    const due = s => s.times <= (minBy[gOfB(s.batch)] === undefined ? minTimes : minBy[gOfB(s.batch)]);
+    const roundOn = settings.onceRound !== false;
     // trace: for every slot, why each batch and each student was left out (first reason wins)
     const trace = {};
     const tr = pid => trace[pid] || (trace[pid] = { rules: [], batch: new Map(), stu: new Map() });
     const note = (m, key, why) => { if (!m.has(key)) m.set(key, why); };
-    function fill(p, batches, basis) {
-      const pool = []; const T = tr(p.id); const R = { rule: basis, batches: batches.length, open: 0 }; T.rules.push(R);
-      for (const b of batches) {
-        const nStu = (byBatch.get(b) || []).length;
-        if (!ctx.occ.has(b)) { note(T.batch, b, ['noTimetable', nStu]); continue; }
-        if (ctx.occ.get(b).has(p.day + '|' + p.shift)) { note(T.batch, b, ['inClass', nStu]); continue; }
-        if (opposite && classShifts.get(b).has(p.shift[0])) { note(T.batch, b, ['sameShift', nStu]); continue; }
-        if (!placeOk(b, p)) { note(T.batch, b, ['campus', nStu]); continue; }
-        if (!classOk(b, p.t)) { classSkips++; note(T.batch, b, ['classGroup', nStu]); continue; }
-        R.open++; T.batch.set(b, ['open', nStu]);
-        for (const s of (byBatch.get(b) || [])) pool.push(s);
-      }
-      pool.sort((a, b) => a.times - b.times || ((a.last || '') < (b.last || '') ? -1 : (a.last || '') > (b.last || '') ? 1 : a.batch < b.batch ? -1 : a.batch > b.batch ? 1 : a.roll < b.roll ? -1 : 1));
-      for (const s of pool) {
-        if ((count.get(p.id) || 0) >= p.k) { note(T.stu, s.roll, 'seatsFull'); continue; }
-        if (used.has(s.roll)) { note(T.stu, s.roll, 'bookedElsewhere'); continue; }
-        if (roundOn && roundGate && s.times > minTimes) { roundSkips++; note(T.stu, s.roll, 'round'); continue; }
-        if (gapCut && s.last && s.last >= gapCut) { gapSkips++; note(T.stu, s.roll, 'gap'); continue; }
-        if (settings.noRepeatTeacher && s.teachersSeen.has(p.t)) { repeatSkips++; note(T.stu, s.roll, 'repeat'); continue; }
-        used.add(s.roll); count.set(p.id, (count.get(p.id) || 0) + 1); assign.push({ pid: p.id, s, basis }); T.stu.set(s.roll, 'booked');
-      }
-    }
     const tMatch = (r, t) => {
       const v = list(r.tValue);
       if (r.tType === 'class') return v.includes(tcls(t));
@@ -395,25 +382,65 @@
     const rules = (settings.rules && settings.rules.length ? settings.rules : defaultRules()).filter(r => r.on);
     if (keep) for (const p of plan) for (const [roll, basis] of (keep[p.id] || [])) {
       const s = students.get(roll); if (!s || used.has(roll) || (count.get(p.id) || 0) >= p.k) continue;
-      used.add(roll); count.set(p.id, (count.get(p.id) || 0) + 1); assign.push({ pid: p.id, s, basis: basis || 'Kept' });
+      used.add(roll); count.set(p.id, (count.get(p.id) || 0) + 1); assign.push({ pid: p.id, s, basis: basis || 'Kept' }); tr(p.id).stu.set(roll, 'booked');
     }
     const ruleMiss = (r, t) => r.sType === 'taught' ? `${t} teaches no batch that is in the student file`
       : r.sType === 'group' ? (tcls(t) ? `no batch of ${t}'s class group (${tcls(t)}) is in both the student file and the timetable` : `${t} has no class set in the teacher list`)
       : 'no batch in the student file matches this rule';
-    for (const r of rules) for (const p of plan) {
-      if (!tMatch(r, p.t)) { tr(p.id).rules.push({ rule: r.name || 'Rule', skipped: 'this rule does not apply to this teacher' }); continue; }
-      const b = pool(r, p.t); if (!b.length) { tr(p.id).rules.push({ rule: r.name || 'Rule', batches: 0, open: 0, empty: ruleMiss(r, p.t) }); continue; }
-      fill(p, b, r.name || 'Rule');
-    }
-    // optional second pass: seats still empty go to the students counselled longest ago
-    if (roundOn && settings.roundTopUp) { roundGate = false; for (const r of rules) for (const p of plan) if (tMatch(r, p.t)) fill(p, pool(r, p.t), (r.name || 'Rule') + ' (empty seat)'); }
+    // candidates per slot: the union of every matching rule's batches that pass the must-hold checks
+    const cand = plan.map(p => {
+      const T = tr(p.id), firstRule = new Map();
+      rules.forEach((r, ri) => {
+        const name = r.name || 'Rule';
+        if (!tMatch(r, p.t)) { T.rules.push({ rule: name, skipped: 'this rule does not apply to this teacher' }); return; }
+        const bs = pool(r, p.t); if (!bs.length) { T.rules.push({ rule: name, batches: 0, open: 0, empty: ruleMiss(r, p.t) }); return; }
+        const R = { rule: name, batches: bs.length, open: 0 }; T.rules.push(R);
+        for (const b of bs) {
+          const nStu = (byBatch.get(b) || []).length;
+          if (!ctx.occ.has(b)) { note(T.batch, b, ['noTimetable', nStu]); continue; }
+          if (ctx.occ.get(b).has(p.day + '|' + p.shift)) { note(T.batch, b, ['inClass', nStu]); continue; }
+          if (opposite && classShifts.get(b).has(p.shift[0])) { note(T.batch, b, ['sameShift', nStu]); continue; }
+          if (!placeOk(b, p)) { note(T.batch, b, ['campus', nStu]); continue; }
+          if (!classOk(b, p.t)) { classSkips++; note(T.batch, b, ['classGroup', nStu]); continue; }
+          R.open++; T.batch.set(b, ['open', nStu]); if (!firstRule.has(b)) firstRule.set(b, [ri, name]);
+        }
+      });
+      const cl = [];
+      for (const [b, [ri, name]] of firstRule) for (const s of byBatch.get(b) || []) {
+        if (gapCut && s.last && s.last >= gapCut) { gapSkips++; note(T.stu, s.roll, 'gap'); continue; }
+        cl.push({ s, ri, name, met: s.teachersSeen.has(p.t) ? 1 : 0 });
+      }
+      const dueKey = c => roundOn ? (due(c.s) ? 0 : 1) : 0;
+      cl.sort((a, b) => dueKey(a) - dueKey(b) || (roundOn ? a.s.times - b.s.times : 0) || a.met - b.met || a.ri - b.ri || ((a.s.last || '') < (b.s.last || '') ? -1 : (a.s.last || '') > (b.s.last || '') ? 1 : a.s.roll < b.s.roll ? -1 : 1));
+      return { p, list: cl };
+    });
+    const passes = [{ round: roundOn, repeat: !!settings.noRepeatTeacher, tag: '' }];
+    if (roundOn) passes.push({ round: false, repeat: !!settings.noRepeatTeacher, tag: 'already counselled this round' });
+    if (settings.noRepeatTeacher) passes.push({ round: false, repeat: false, tag: 'met this teacher before' });
+    const passCount = passes.map(() => 0);
+    passes.forEach((ps, pi) => {
+      const ok = c => !used.has(c.s.roll) && !(ps.round && !due(c.s)) && !(ps.repeat && c.met);
+      if (pi === 0) for (const x of cand) for (const c of x.list) if (!used.has(c.s.roll)) { if (ps.round && !due(c.s)) roundSkips++; else if (ps.repeat && c.met) repeatSkips++; }
+      const order = cand.filter(x => (count.get(x.p.id) || 0) < x.p.k).map(x => [x, x.list.filter(ok).length]).sort((a, b) => a[1] - b[1]).map(a => a[0]);
+      for (let progress = true; progress;) {
+        progress = false;
+        for (const x of order) {
+          if ((count.get(x.p.id) || 0) >= x.p.k) continue;
+          const c = x.list.find(ok); if (!c) continue;
+          used.add(c.s.roll); count.set(x.p.id, (count.get(x.p.id) || 0) + 1); passCount[pi]++; progress = true;
+          assign.push({ pid: x.p.id, s: c.s, basis: c.name + (ps.tag ? ` (${ps.tag})` : '') }); tr(x.p.id).stu.set(c.s.roll, 'booked');
+        }
+      }
+    });
+    // why the rest of each slot's candidates were not booked there
+    for (const x of cand) { const T = tr(x.p.id); for (const c of x.list) if (!T.stu.has(c.s.roll)) T.stu.set(c.s.roll, (count.get(x.p.id) || 0) >= x.p.k ? 'seatsFull' : 'bookedElsewhere'); }
     // times
     const byP = {}; assign.forEach(a => (byP[a.pid] = byP[a.pid] || []).push(a));
     const pm = Object.fromEntries(plan.map(p => [p.id, p]));
     const rows = [];
     for (const pid in byP) byP[pid].sort((a, b) => a.s.roll < b.s.roll ? -1 : 1).forEach((a, i) => { const p = pm[pid]; rows.push({ ...a, p, time: hm(p.start + p.unit * i), batchShift: shiftOf(a.s.batch) }); });
     rows.sort((a, b) => cmp([DAYS.indexOf(a.p.day), SLOTS.indexOf(a.p.shift), a.p.cabin, a.time], [DAYS.indexOf(b.p.day), SLOTS.indexOf(b.p.shift), b.p.cabin, b.time]));
-    const why = ['not enough free students of this class' + (ctx.split ? ' and campus' : '')].concat(settings.noRepeatTeacher ? ['who haven’t met this teacher'] : [], roundOn ? [`and still due this round`] : []).join(' ');
+    const why = 'no free student of this class group' + (ctx.split ? ' on this campus' : '') + ' is left at this time; see the Why tab';
     const short = plan.filter(p => (count.get(p.id) || 0) < p.k).map(p => `${p.t} on ${p.day} ${p.shift}${ctx.split ? ` (${SITE_NAME[p.site]})` : ''}: ${count.get(p.id) || 0} of ${p.k} seats filled (${why}).`);
     const noCls = [...new Set(plan.filter(p => !tcls(p.t)).map(p => p.t))].map(t => `${t} has no class (11th / 12th / Target / FTP) in the teacher list, so only students of batches they teach could be matched.`);
     const ftp = [...new Set(plan.filter(p => ctx.inferredFTP(p.t)).map(p => p.t))];
@@ -422,9 +449,9 @@
     const cov = { active: 0, done: 0, byClass: {} };
     for (const b of allB) for (const s of byBatch.get(b) || []) {
       const c = batchCls[b] || 'Not known', x = cov.byClass[c] || (cov.byClass[c] = { active: 0, done: 0, roundDone: 0 });
-      cov.active++; x.active++; if (s.times > 0) { cov.done++; x.done++; } if (s.times > minTimes) x.roundDone++;
+      cov.active++; x.active++; if (s.times > 0) { cov.done++; x.done++; } if (!due(s)) x.roundDone++;
     }
-    cov.round = minTimes + 1; cov.roundDone = activeStu.filter(s => s.times > minTimes).length; cov.reachable = activeStu.length;
+    cov.round = minTimes + 1; cov.roundDone = activeStu.filter(s => !due(s)).length; cov.byGroup = Object.fromEntries(Object.entries(minBy).map(([g, m]) => [g === 'none' ? 'No class' : g[0] === 'g' ? groups[+g.slice(1)].join(' + ') : g.slice(4), m + 1])); cov.reachable = activeStu.length;
     const slotLog = plan.map(p => {
       const T = trace[p.id] || { rules: [], batch: new Map(), stu: new Map() };
       const bz = {}, sz = {};
@@ -432,7 +459,7 @@
       for (const why of T.stu.values()) sz[why] = (sz[why] || 0) + 1;
       return { id: p.id, t: p.t, tClass: tcls(p.t) || '', day: p.day, shift: p.shift, site: p.site, cabin: p.cabin, k: p.k, filled: count.get(p.id) || 0, rules: T.rules, batches: bz, students: sz };
     });
-    return { rows, repeatSkips, gapSkips, roundSkips, classSkips, minTimes, coverage: cov, batchCls, warnings: [...ftpNote, ...noCls, ...short], counts: Object.fromEntries(plan.map(p => [p.id, count.get(p.id) || 0])), slotLog, allB, studentBatches: [...byBatch.keys()], byBatchSize: Object.fromEntries([...byBatch].map(([b, a]) => [b, a.length])) };
+    return { rows, repeatSkips, gapSkips, roundSkips, classSkips, minTimes, coverage: cov, batchCls, warnings: [...ftpNote, ...noCls, ...short], counts: Object.fromEntries(plan.map(p => [p.id, count.get(p.id) || 0])), passes: passes.map((ps, i) => ({ tag: ps.tag, booked: passCount[i] })), minBy, slotLog, allB, studentBatches: [...byBatch.keys()], byBatchSize: Object.fromEntries([...byBatch].map(([b, a]) => [b, a.length])) };
   }
 
   /* ---------- the "why" log: every step from files to bookings, in plain words ---------- */
@@ -445,9 +472,7 @@
   };
   const S_WHY = {
     bookedElsewhere: 'already booked with another teacher this week',
-    round: 'already counselled this round (Rounds is on)',
     gap: 'counselled too recently (Minimum gap)',
-    repeat: 'has met this teacher before (No repeat teacher is on)',
     seatsFull: 'slot was already full'
   };
   // level: ok | warn | fail
@@ -488,11 +513,12 @@
     const c = result.coverage;
     if (settings.onceRound !== false) {
       const due = c.reachable - c.roundDone;
-      add('Rounds', due < c.reachable / 2 ? 'warn' : 'ok', `Round ${c.round}: only students counselled ${result.minTimes} time${result.minTimes === 1 ? '' : 's'} can be booked. ${due} of ${c.reachable} reachable students are still due; ${c.roundDone} are held back until the round ends.${settings.roundTopUp ? '' : ' "Fill empty seats" is off, so their seats stay empty.'}`);
+      add('Rounds', 'ok', `Rounds are counted inside each class group: ${Object.entries(c.byGroup || {}).map(([g, n]) => `${g} round ${n}`).join(', ')}. ${due} of ${c.reachable} reachable students are due this round and go first; others fill seats only when no due student is free.`);
     }
     // 6 per slot
     const booked = result.rows.length, cap = plan.reduce((a, p) => a + p.k, 0);
-    add('Matching', booked ? (booked < cap ? 'warn' : 'ok') : 'fail', `${booked} of ${cap} seats filled. Rejections: ${result.roundSkips} by Rounds, ${result.repeatSkips} by No repeat teacher, ${result.gapSkips} by Minimum gap, ${result.classSkips} batch checks by Strict class matching.`);
+    const P = result.passes || [];
+    add('Matching', booked ? (booked < cap ? 'warn' : 'ok') : 'fail', `${booked} of ${cap} seats filled.${P.length ? ` ${P[0].booked} with students due this round who have not met the teacher` + P.slice(1).map(x => `, ${x.booked} with students ${x.tag}`).join('') + '.' : ''}${result.gapSkips ? ` ${result.gapSkips} candidate places skipped by the minimum gap.` : ''}`);
     for (const x of result.slotLog) {
       const d = [];
       for (const r of x.rules) d.push(r.skipped ? `Rule "${r.rule}": skipped, ${r.skipped}.` : r.empty ? `Rule "${r.rule}": no batches, ${r.empty}.` : `Rule "${r.rule}": ${pl(r.batches, 'batch')} considered, ${r.open} free and allowed.`);
@@ -500,7 +526,7 @@
       for (const [w, n] of Object.entries(x.students)) if (w !== 'booked') d.push(`${pl(n, 'student')} out: ${S_WHY[w]}.`);
       // main reason: what removed the most students
       const cand = [...Object.entries(x.batches).filter(([w]) => w !== 'open').map(([w, v]) => [B_WHY[w], v.students]), ...Object.entries(x.students).filter(([w]) => w !== 'booked').map(([w, n]) => [S_WHY[w], n])].sort((a, b) => b[1] - a[1]);
-      const main = x.filled >= x.k ? 'full' : !x.rules.some(r => r.batches) ? 'no rule gave this teacher any batch' : cand.length ? cand[0][0] : 'no free students';
+      const main = x.filled >= x.k ? 'full' : !x.rules.some(r => r.batches) ? 'no rule gave this teacher any batch' : !Object.keys(x.batches).includes('open') ? `no batch is free at this time (${cand.length ? cand[0][0] : 'none'})` : 'every free student of this class group is already booked in another slot this week';
       add(`${x.day} ${x.shift} · ${x.t}${x.tClass ? ' (' + x.tClass + ')' : ''}`, x.filled >= x.k ? 'ok' : x.filled ? 'warn' : 'fail', `${x.filled} of ${x.k} seats filled${x.filled >= x.k ? '.' : `. Main reason: ${main}.`}`, d);
     }
     return L;
