@@ -686,7 +686,7 @@
     const ctx = makeCtx(o.tt, s), ttB = [...ctx.occ.keys()].filter(b => !ctx.isDoubt(b) && !/counsel/i.test(b)), ttSet = new Set(ttB);
     const active = [...o.students.values()].filter(x => x.status !== 'Left'), byB = {};
     for (const x of active) (byB[x.batch] = byB[x.batch] || []).push(x);
-    const SH = activeShifts(s), ct = [...new Set(o.tt.entries.filter(e => ctx.isCounsel(e) && SH.includes(e.slot)).map(e => e.t))].sort();
+    const ct = [...new Set(weekSlots(o.tt, s).map(x => x.t))].sort();
     for (const t of ct) {
       const x = T[t];
       if (!x) add('lock', `${t} has a counselling slot this week but is not in the Teachers section.`, `Timetable, teacher ${t}`, `Add ${t} in the Teachers section with the batches they counsel.`);
@@ -797,12 +797,42 @@
     return w;
   }
 
+  /* The week's counselling slots: the timetable's counselling cells, plus slots added and minus slots removed in Set up.
+     settings.slotAdj = { week, add: [{t, day, shift}], remove: [{t, day, shift}] }; it applies only to that week. */
+  const adjOf = s => (s.slotAdj && s.slotAdj.week === s.weekStart) ? s.slotAdj : { week: s.weekStart, add: [], remove: [] };
+  function weekSlots(tt, settings) {
+    const ctx = makeCtx(tt, settings), SH = activeShifts(settings), adj = adjOf(settings), key = x => x.t + '|' + x.day + '|' + x.shift;
+    const rm = new Set((adj.remove || []).map(key));
+    const out = tt.entries.filter(x => ctx.isCounsel(x) && SH.includes(x.slot)).map(x => ({ t: x.t, day: x.day, shift: x.slot, label: x.room || x.subj, added: false })).filter(x => !rm.has(key(x)));
+    const seen = new Set(out.map(key));
+    for (const a of adj.add || []) if (SH.includes(a.shift) && !seen.has(key(a))) { out.push({ t: a.t, day: a.day, shift: a.shift, label: 'Added', added: true }); seen.add(key(a)); }
+    return out;
+  }
+  // one more counselling slot for teacher t: a period where t has no class and no counselling and a cabin is free.
+  // Preferred: periods where students of t's batches to counsel are free (opposite shift, no class), then the emptiest period, then a day t has fewer slots.
+  function pickSlot(tt, settings, t, students) {
+    const ctx = makeCtx(tt, settings), cur = weekSlots(tt, settings), SH = activeShifts(settings), cab = ctx.cabinsAll.length;
+    const per = {}; for (const x of cur) per[x.day + '|' + x.shift] = (per[x.day + '|' + x.shift] || 0) + 1;
+    const mine = new Set(cur.filter(x => x.t === t).map(x => x.day + '|' + x.shift));
+    const counsel = ((settings.teachers[t] || {}).counsel || []).map(normBatch), byShift = {};
+    if (students) for (const s of students.values()) if (s.status !== 'Left') { const o = byShift[s.batch] || (byShift[s.batch] = { M: 0, E: 0 }); if (s.shift === 'Morning') o.M++; else if (s.shift === 'Evening') o.E++; }
+    let best = null;
+    for (const d of DAYS) for (const sl of SH) {
+      const k = d + '|' + sl;
+      if (!ctx.teacherFree(t, d, sl) || mine.has(k) || (per[k] || 0) >= cab) continue;
+      let free = 0; for (const b of counsel) { if (!ctx.occ.has(b) || ctx.occ.get(b).has(k)) continue; const c = byShift[b]; if (c) free += sl[0] === 'E' ? c.M : c.E; }
+      const sameDay = cur.filter(x => x.t === t && x.day === d).length, rank = [free ? 0 : 1, per[k] || 0, sameDay, DAYS.indexOf(d), SLOTS.indexOf(sl)];
+      if (!best || cmp(rank, best.rank) < 0) best = { rank, day: d, shift: sl, students: free };
+    }
+    return best ? { day: best.day, shift: best.shift, students: best.students } : null;
+  }
+
   /* Step 1+2: counselling slots, overflow moves, cabins, student counts */
   function buildPlan(tt, settings) {
     const ctx = makeCtx(tt, settings); const cabins = settings.cabins.filter(Boolean); const warnings = [];
     const SH = activeShifts(settings), MV = moveShifts(settings);
-    let plan = tt.entries.filter(e => ctx.isCounsel(e) && SH.includes(e.slot))
-      .map((e, i) => ({ id: 'p' + i, t: e.t, origDay: e.day, origShift: e.slot, day: e.day, shift: e.slot, label: e.room || e.subj, moved: false, manual: false }));
+    let plan = weekSlots(tt, settings)
+      .map((e, i) => ({ id: 'p' + i, t: e.t, origDay: e.added ? '' : e.day, origShift: e.added ? '' : e.shift, day: e.day, shift: e.shift, label: e.label, moved: false, manual: false, added: e.added }));
     tt.entries.filter(e => ctx.isCounsel(e) && !SH.includes(e.slot)).forEach(e => warnings.push(`${e.t} has a counselling cell on ${e.day} ${e.slot}, but ${e.slot} is switched off for counselling, so it was skipped.`));
     plan.forEach(p => { p.site = ctx.compute(p.t, p.day, p.shift).site; });
     const at = (d, s, site) => plan.filter(p => p.day === d && p.shift === s && p.site === site);
@@ -1047,6 +1077,6 @@
   const logText = L => L.map(l => `[${l.level.toUpperCase()}] ${l.step}: ${l.text}` + l.detail.map(d => '\n    - ' + d).join('')).join('\n');
 
   const api = { DAYS, SLOTS, COUNSEL_SHIFTS, activeShifts, defaultRules, defaultSettings, parseTimetable, parseStudents, buildStudents, buildPlan, finalizePlan, validatePlan, assignStudents, workload, makeCtx, hm, addDays, buildLog, logText, readTemplate, fillTemplate, TEMPLATE, TB, readTeacherBatches, checkTeacherBatches, fillTeacherBatchTemplate, timetableEdits,
-    roomBatches, normShift, nearMatch, readStudentList, buildStudentsV2, fillStudentList, readTeachers, taughtFromTimetable, fillTeachersTemplate, checkInputs, batchTimetable, SL, TS };
+    roomBatches, normShift, nearMatch, weekSlots, pickSlot, readStudentList, buildStudentsV2, fillStudentList, readTeachers, taughtFromTimetable, fillTeachersTemplate, checkInputs, batchTimetable, SL, TS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.MCSEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);
