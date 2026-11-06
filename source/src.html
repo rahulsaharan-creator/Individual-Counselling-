@@ -3,27 +3,32 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Counselling Planner</title>
+<title>Counselling Planner · Matrix Academy</title>
+<link rel="icon" type="image/png" href="__FAVICON__">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
 :root{
-  --bg:#F3F4F1;--surface:#FFFFFF;--surface2:#F8F9F7;--ink:#13231D;--ink2:#2E3D37;--muted:#64716B;--line:#DCE1DD;--line2:#EAEDEA;
-  --accent:#0F6B47;--accent-h:#0B5A3B;--accent-ink:#FFFFFF;--accent-soft:#E3EFE8;--brass:#A6761A;--brass-soft:#F5EBD3;--danger:#A8322A;--danger-soft:#F8E4E1;
-  --c0:#D7EADD;--c1:#DBE4F1;--c2:#F0E5CD;--c3:#E6DCEF;--c4:#F1DBDF;--c5:#D5EAE9;
-  --sh1:0 1px 2px rgba(19,35,29,.06);--sh2:0 10px 30px -12px rgba(19,35,29,.22);
-  --sans:"Instrument Sans",system-ui,-apple-system,"Segoe UI",Arial,sans-serif;--serif:"Newsreader",Georgia,"Times New Roman",serif;
+  /* Matrix Academy brand, from matrixedu.in: green #02824F / #03B46E, navy #13488E, ink #101823, greys #4B5563 #718298, lines #D0D5DD, light #EDF4FD */
+  --bg:#F4F7FB;--surface:#FFFFFF;--surface2:#F6F9FE;--ink:#101823;--ink2:#344054;--muted:#667085;--line:#D0D5DD;--line2:#EAECF0;
+  --accent:#02824F;--accent-h:#026E47;--accent-ink:#FFFFFF;--accent-soft:#E6F5EE;--navy:#13488E;--navy-soft:#EDF4FD;
+  --brass:#B54708;--brass-soft:#FFF4E5;--danger:#B42318;--danger-soft:#FEE4E2;
+  --c0:#DDF2E8;--c1:#E1ECFB;--c2:#FDF0DB;--c3:#ECE6FA;--c4:#FBE4E8;--c5:#DCF3F4;
+  --sh1:0 1px 2px rgba(16,24,40,.05);--sh2:0 12px 32px -12px rgba(16,24,40,.18);
+  --sans:"Plus Jakarta Sans",system-ui,-apple-system,"Segoe UI",Arial,sans-serif;--serif:var(--sans);
   box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
-  --bg:#0D1411;--surface:#141D19;--surface2:#18231E;--ink:#E7EDEA;--ink2:#C9D3CE;--muted:#93A19A;--line:#27332E;--line2:#1F2A25;
-  --accent:#55C08A;--accent-h:#6FD09F;--accent-ink:#06210F;--accent-soft:#16352A;--brass:#E2B04F;--brass-soft:#382B10;--danger:#F08A7E;--danger-soft:#3A1916;
-  --c0:#1B3527;--c1:#1B2A3E;--c2:#382E19;--c3:#2D2440;--c4:#3B1F27;--c5:#173434;--sh1:none;--sh2:0 12px 32px -12px rgba(0,0,0,.6);color-scheme:dark}}
+  --bg:#0B1220;--surface:#111A2B;--surface2:#16213A;--ink:#E8EDF5;--ink2:#C3CCD7;--muted:#98A2B3;--line:#26324A;--line2:#1C2740;
+  --accent:#03B46E;--accent-h:#2FCB8A;--accent-ink:#04140D;--accent-soft:#0E2E22;--navy:#8DB4F0;--navy-soft:#15233D;
+  --brass:#F5A54A;--brass-soft:#33230F;--danger:#F97066;--danger-soft:#3A1715;
+  --c0:#123326;--c1:#152A47;--c2:#3A2C12;--c3:#2A2245;--c4:#3D1C25;--c5:#123536;--sh1:none;--sh2:0 12px 32px -12px rgba(0,0,0,.6);color-scheme:dark}}
 :root[data-theme="dark"]{
-  --bg:#0D1411;--surface:#141D19;--surface2:#18231E;--ink:#E7EDEA;--ink2:#C9D3CE;--muted:#93A19A;--line:#27332E;--line2:#1F2A25;
-  --accent:#55C08A;--accent-h:#6FD09F;--accent-ink:#06210F;--accent-soft:#16352A;--brass:#E2B04F;--brass-soft:#382B10;--danger:#F08A7E;--danger-soft:#3A1916;
-  --c0:#1B3527;--c1:#1B2A3E;--c2:#382E19;--c3:#2D2440;--c4:#3B1F27;--c5:#173434;--sh1:none;--sh2:0 12px 32px -12px rgba(0,0,0,.6);color-scheme:dark}
+  --bg:#0B1220;--surface:#111A2B;--surface2:#16213A;--ink:#E8EDF5;--ink2:#C3CCD7;--muted:#98A2B3;--line:#26324A;--line2:#1C2740;
+  --accent:#03B46E;--accent-h:#2FCB8A;--accent-ink:#04140D;--accent-soft:#0E2E22;--navy:#8DB4F0;--navy-soft:#15233D;
+  --brass:#F5A54A;--brass-soft:#33230F;--danger:#F97066;--danger-soft:#3A1715;
+  --c0:#123326;--c1:#152A47;--c2:#3A2C12;--c3:#2A2245;--c4:#3D1C25;--c5:#123536;--sh1:none;--sh2:0 12px 32px -12px rgba(0,0,0,.6);color-scheme:dark}
 *{box-sizing:border-box}
 html{scroll-padding-top:calc(env(safe-area-inset-top,0px) + 130px)}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.55;font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
@@ -233,6 +238,54 @@ dialog form{display:flex;flex-direction:column;height:100%}
 @media (max-width:640px){ .rule{grid-template-columns:auto minmax(0,1fr)} .rule .acts{grid-column:2} .rule .sent select.input,.rule .sent input.input{width:100%!important} }
 @media (max-width:520px){ .grid3{grid-template-columns:1fr 1fr} .calc-label{display:none} }
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+/* Matrix look */
+.appbar{border-top:3px solid var(--accent);box-shadow:var(--sh1)}
+.bar{min-height:64px}
+.logo{display:flex;align-items:center;gap:14px;margin-right:auto;min-width:0;text-decoration:none;color:inherit}
+.logo img{height:26px;width:auto;display:block}
+.logo .logo-w{display:none}
+:root[data-theme="dark"] .logo .logo-g{display:none}:root[data-theme="dark"] .logo .logo-w{display:block}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .logo .logo-g{display:none}:root:not([data-theme="light"]) .logo .logo-w{display:block}}
+.logo .sep{width:1px;height:28px;background:var(--line)}
+.logo .brand{margin:0}
+.brand b{font-size:16px;font-weight:700;letter-spacing:-.01em}
+.btn{border-radius:999px;padding:8px 16px;font-weight:600}
+.btn.sm{border-radius:999px;padding:5px 12px}
+.icon-btn{padding:0}
+.input,select.input,textarea.input{border-radius:10px}
+textarea.input{border-radius:10px}
+h1{font-weight:800;font-size:32px;letter-spacing:-.02em}
+.gh{font-weight:700;font-size:22px;letter-spacing:-.01em}
+.section h2,.drop h3,.empty h2,.sheet .hd h3{font-weight:700;letter-spacing:-.01em}
+.drop h3{font-size:19px}
+.kpi b{font-weight:800;font-size:34px;color:var(--ink)}
+.kpi span{font-weight:500}
+.board .dh b{font-weight:700;font-size:16px}
+.card,.tbl,.boardwrap,.kpis{border-radius:16px}
+.stepper button.on{color:var(--accent)}
+.tabs{border-radius:999px;padding:4px}
+.tabs button{border-radius:999px;padding:7px 16px}
+.tabs button.on{background:var(--accent);color:var(--accent-ink)}
+.tabs .more{border:0;background:none;color:var(--muted);font-weight:600;font-size:14px;padding:7px 10px;border-radius:999px;cursor:pointer}
+.tabs .more.on{background:var(--accent);color:var(--accent-ink)}
+.menu{position:relative;display:inline-block}
+.menu>summary{list-style:none}
+.menu>summary::-webkit-details-marker{display:none}
+.menu .menu-list{position:absolute;right:0;top:calc(100% + 6px);z-index:8;background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--sh2);padding:6px;min-width:260px;display:flex;flex-direction:column}
+.menu .menu-list button{border:0;background:none;text-align:left;padding:9px 12px;border-radius:10px;cursor:pointer;font-weight:500;font-size:14px;color:var(--ink);display:flex;gap:8px;align-items:center}
+.menu .menu-list button:hover{background:var(--surface2)}
+.menu .menu-list small{display:block;color:var(--muted);font-size:12.5px;font-weight:400}
+details.fold{border:1px solid var(--line);border-radius:16px;background:var(--surface);padding:16px 20px;margin-bottom:28px}
+details.fold>summary{cursor:pointer;font-weight:700;font-size:18px;list-style:none;display:flex;align-items:center;gap:10px}
+details.fold>summary::-webkit-details-marker{display:none}
+details.fold>summary::before{content:"›";display:inline-block;transition:transform .15s;color:var(--muted);font-size:22px;line-height:1}
+details.fold[open]>summary::before{transform:rotate(90deg)}
+details.fold>summary .muted{font-weight:500;font-size:14px}
+.notice{border-radius:12px}
+.notice.i{background:var(--navy-soft)}
+.badge.ok{background:var(--accent-soft);color:var(--accent)}
+.footer{max-width:1440px;margin:0 auto;padding:0 28px 28px;color:var(--muted);font-size:13px;display:flex;gap:8px;align-items:center}
+.footer img{height:18px;opacity:.9}
 .mcs-who{position:fixed;inset:0;z-index:100;display:grid;place-items:center;background:rgba(0,0,0,.2);padding:16px;box-sizing:border-box}
 .mcs-who *{box-sizing:border-box}
 .mcs-who form{background:var(--surface,#fff);color:var(--ink,inherit);border:1px solid var(--line,#8886);max-width:380px;width:100%;padding:24px;border-radius:14px;display:flex;flex-direction:column;gap:12px;box-shadow:0 10px 40px rgba(0,0,0,.25)}
@@ -242,8 +295,8 @@ dialog form{display:flex;flex-direction:column;height:100%}
 <body>
 <header class="appbar">
   <div class="bar">
-    <div class="mark" aria-hidden="true">C</div>
-    <div class="brand"><b>Counselling Planner</b><span id="weekLabel">No week loaded</span></div>
+    <div class="logo"><img class="logo-g" src="__LOGO_GREEN__" alt="Matrix Academy" width="150" height="26"><img class="logo-w" src="__LOGO_WHITE__" alt="Matrix Academy" width="150" height="26"><span class="sep" aria-hidden="true"></span>
+      <div class="brand"><b>Counselling Planner</b><span id="weekLabel">No week loaded</span></div></div>
     <button class="btn ghost icon-btn" id="themeBtn" type="button" aria-label="Switch between light and dark">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
     <button class="btn primary" id="calcBtn" type="button" disabled><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 21v-5h5"/></svg><span class="calc-label" id="calcLabel">Calculate schedule</span></button>
@@ -254,6 +307,7 @@ dialog form{display:flex;flex-direction:column;height:100%}
   </ol></nav>
 </header>
 <main id="main"></main>
+<footer class="footer"><img class="logo-g" src="__FAVICON__" alt="" width="18" height="18"><span>Matrix Academy, Sikar · Operations · Data stays on this computer</span></footer>
 <dialog id="dlg" class="sheet" aria-labelledby="dlgTitle"><form method="dialog" id="dlgForm"></form></dialog>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <div class="busy" id="busy"><div><span class="spin" aria-hidden="true"></span><span id="busyText">Working…</span></div></div>
@@ -725,18 +779,22 @@ function viewUpload() {
       <div class="status">${tt ? `<span class="badge ok">Loaded</span> <b>${esc(st.ttName)}</b><br><span class="muted">${tt.teachers.length} teachers · ${counsel} counselling cells${tt.weekStart ? ` · week of ${fmtShort(tt.weekStart)}` : ''}</span>` : '<span class="muted">Choose a file or drop it here</span>'}</div></label>
     <label class="drop ${rc ? 'loaded' : ''}" data-drop="rec"><input type="file" accept=".xlsx,.xls" id="recFile">
       <span class="fileic">${ICON.file}</span><h3>Student list</h3>
-      <p>One row per student: Roll No, Student Name, Batch, Shift (Morning or Evening, when the student has classes) and Status, then the counselling history: Last counselled date, Last counsellor, Remarks, 2nd last, and so on. Upload it once; it stays on this computer.</p>
+      <p>One row per student: Roll No, Student Name, Batch, Shift (Morning or Evening, when the student has classes) and Status, then the counselling history in Round 1 to Round 5 columns (date, teacher, remarks). Upload it once; it stays on this computer.</p>
       <div class="status">${rc ? `<span class="badge ok">Loaded</span> <b>${esc(st.recName)}</b><br><span class="muted">${st.students ? st.students.size.toLocaleString() : 0} students from ${rc.map(u => esc(u.sheet)).join(', ')}</span>` : '<span class="muted">Choose a file or drop it here</span>'}</div></label>
   </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center"><button class="btn sm" type="button" id="dlTpl">${ICON.dl}Download student list template</button><span class="muted" style="font-size:13.5px">Empty list with the columns, dropdowns and instructions.</span></div>
   ${st.oldRec ? '<div class="notice w" style="margin-top:12px">The student file uploaded before has no Shift column, so it cannot be used any more. Upload the student list in the new format.</div>' : ''}
   ${recChecks()}
   ${tt && tt.warnings.length ? `<div class="notice w" style="margin-top:16px"><b>Timetable notes</b><ul>${tt.warnings.map(w => `<li>${esc(w)}</li>`).join('')}</ul></div>` : ''}
-  <div class="optline" style="margin-top:16px;display:block"><b>Counselling records database (kept on this computer)</b> <span class="muted">${dbRecs().length.toLocaleString()} students counselled across ${new Set(dbRecs().map(x => x.week)).size} saved week${new Set(dbRecs().map(x => x.week)).size === 1 ? '' : 's'}. They count as history together with the student file, so the same students are not booked again until everyone has had a turn. Save a week from Weekly schedule → Dashboard.</span>
+  `;
+}
+
+function viewRecordsAdmin() {
+  const tt = st.tt, rc = st.recMeta;
+  return `  <div class="optline" style="margin-top:16px;display:block"><b>Counselling records database (kept on this computer)</b> <span class="muted">${dbRecs().length.toLocaleString()} students counselled across ${new Set(dbRecs().map(x => x.week)).size} saved week${new Set(dbRecs().map(x => x.week)).size === 1 ? '' : 's'}. They count as history together with the student file, so the same students are not booked again until everyone has had a turn. Save a week from Weekly schedule → Dashboard.</span>
     <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap"><button class="btn sm" type="button" id="expRec2" ${dbRecs().length ? '' : 'disabled'}>Export records (Excel)</button><label class="btn sm" style="cursor:pointer">Import records<input type="file" accept=".xlsx,.xls" id="impRec" class="hide"></label></div></div>
   ${tt || rc ? '<div style="margin-top:14px"><button class="btn ghost danger sm" type="button" id="clearData">Remove uploaded files</button></div>' : ''}`;
 }
-
 function viewWeek() {
   const s = st.settings;
   const cb = s.cabinBuildings || {}, bOpt = v => BLDS().map(b => `<option ${v === b ? 'selected' : ''} value="${esc(b)}">${esc(b)}</option>`).join('');
@@ -822,8 +880,9 @@ function viewSetup() {
     <div class="group" id="sec-slots"><h2 class="gh">Counselling slots this week</h2><p class="gd">The teachers who have a counselling slot this week: the timetable’s slots, plus any you add here. Use + and − to change a teacher’s slots (the planner picks a free period where the teacher has no class and a cabin is free), or add counselling to another teacher. Changes count for this week only and go straight into the schedule and the updated timetable.</p>${viewSlots()}</div>
     <div class="group" id="sec-checks"><h2 class="gh">Checks</h2><p class="gd">Everything the planner needs is checked first. Problems in red keep the schedule locked; each one says where it is and how to fix it.</p>${viewChecks()}</div>
     <div class="group" id="sec-teachers"><h2 class="gh">Teachers <span class="badge">${nT} with batches to counsel</span></h2><p class="gd">Set once, then edit here: add, change or delete a teacher. Uploading a Teachers file replaces the whole list, so keep one master file. “Batches to counsel” decides whose students each teacher gets. Senior teachers’ slots are never moved.</p>${viewTeachers()}</div>
-    <div class="group" id="sec-btt"><h2 class="gh">Batch timetable</h2><p class="gd">Which batch has class at what time. Morning students are counselled only in evening periods, evening students only in morning periods, and never while their batch has class.</p>${viewBatchTT()}</div>
-    <details class="group" id="sec-adv"><summary class="gh" style="cursor:pointer">Advanced settings</summary><p class="gd">Cabins, periods, seats per slot, buildings and backup. Set once.</p>${viewWeek()}<div style="height:18px"></div>${viewRules()}</details>
+    <details class="fold" id="sec-btt"><summary>Batch timetable <span class="muted">· when each batch has class, and Shift mismatches</span></summary><p class="gd" style="margin-top:10px">Morning students are counselled only in evening periods, evening students only in morning periods, and never while their batch has class.</p>${viewBatchTT()}</details>
+    <details class="fold" id="sec-adv"><summary>Advanced settings <span class="muted">· cabins, periods, buildings, records, backup</span></summary><p class="gd" style="margin-top:10px">Set once. Change only when cabins, period times or buildings change.</p>${viewWeek()}<div style="height:18px"></div>
+      <div class="card" style="padding:20px 24px;margin-bottom:18px"><h2 class="gh" style="font-size:18px;margin:0 0 4px">Saved weekly records</h2>${viewRecordsAdmin()}</div>${viewRules()}</details>
     <div class="calcbar card"><div><b>${ok ? 'Ready to calculate' : 'Almost ready'}</b><span class="muted">${ok ? 'The schedule opens on the Weekly schedule page.' : 'Still to do: ' + todo.join(', ') + '.'}</span></div>
       <button class="btn primary" type="button" id="calc3" ${ok ? '' : 'disabled'}>Calculate schedule</button></div>
   </div></div>`;
@@ -835,14 +894,22 @@ function viewSchedule() {
       <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap"><button class="btn" type="button" data-go="0">Go to set up</button><button class="btn primary" type="button" id="calc4" ${ready() ? '' : 'disabled'}>Calculate schedule</button></div></div>`;
   const r = st.result, cap = st.plan.reduce((a, p) => a + p.k, 0);
   const notes = [...(r.invalid || []).map(x => ['e', x]), ...st.planWarnings.map(x => ['w', x]), ...r.warnings.map(x => ['w', x])];
-  const views = [['board', 'Cabin board'], ['sessions', 'Teacher sessions'], ['students', 'Students'], ['reception', 'Reception'], ['remarks', 'Teacher remarks'], ['announce', 'Announcements'], ['dash', 'Dashboard'], ['workload', 'Workload'], ['why', `Why · log${r.rows.length < cap ? ' ⚠' : ''}`], ['notes', `Moves and notes · ${st.moves.length + notes.length}`]];
+  const views = [['board', 'Cabin board'], ['sessions', 'Teacher sessions'], ['students', 'Students'], ['reception', 'Reception'], ['remarks', 'Teacher remarks'], ['dash', 'Dashboard']];
+  const more = [['announce', 'Announcements'], ['workload', 'Workload'], ['why', `Why · log${r.rows.length < cap ? ' ⚠' : ''}`], ['notes', `Moves and notes · ${st.moves.length + notes.length}`]];
+  const moreOn = more.find(([k]) => k === st.view);
   return head('Weekly schedule', 'Select a slot on the board to move it, change its students or remove it. The student list updates straight away.',
-    `<button class="btn" type="button" id="addSlot">${ICON.plus}Add slot</button><button class="btn" type="button" id="dlTT">${ICON.dl}Updated timetable</button><button class="btn" type="button" id="dlSL">${ICON.dl}Updated student list</button><button class="btn" type="button" id="dlRep">${ICON.dl}Download report</button><button class="btn primary" type="button" id="dl">${ICON.dl}Download Excel</button>`)
+    `<button class="btn" type="button" id="addSlot">${ICON.plus}Add slot</button>
+     <details class="menu"><summary class="btn">${ICON.dl}More downloads</summary><div class="menu-list">
+       <button type="button" id="dlRep">Weekly report<small>Attendance, in-out, remarks, absent students</small></button>
+       <button type="button" id="dlTT">Updated faculty timetable<small>With moved and added counselling slots</small></button>
+       <button type="button" id="dlSL">Updated student list<small>This week’s counsellings in the Round columns</small></button></div></details>
+     <button class="btn primary" type="button" id="dl">${ICON.dl}Download schedule (Excel)</button>`)
   + `<div class="kpis"><div class="kpi"><b>${st.plan.length}</b><span>Counselling slots</span></div><div class="kpi"><b>${r.rows.length}</b><span>Students booked of ${cap} seats</span></div>
      <div class="kpi"><b>${st.moves.length}</b><span>Slots moved to a free cabin</span></div><div class="kpi"><b>${r.rows.filter(x => /^Due this round/.test(x.basis)).length}</b><span>Booked from students due this round</span></div></div>
   ${r.rows.length < cap && st.view !== 'why' ? `<div class="notice i">${cap - r.rows.length} seats are empty. <button class="btn sm" type="button" data-view="why">See why</button></div>` : ''}
   ${notes.some(n => n[0] === 'e') ? `<div class="notice e"><b>Fix before sending</b><ul>${notes.filter(n => n[0] === 'e').map(n => `<li>${esc(n[1])}</li>`).join('')}</ul></div>` : ''}
-  <div class="tabs" role="tablist">${views.map(([k, l]) => `<button type="button" role="tab" aria-selected="${st.view === k}" class="${st.view === k ? 'on' : ''}" data-view="${k}">${l}</button>`).join('')}</div>
+  <div class="tabs" role="tablist">${views.map(([k, l]) => `<button type="button" role="tab" aria-selected="${st.view === k}" class="${st.view === k ? 'on' : ''}" data-view="${k}">${l}</button>`).join('')}
+    <select class="more ${moreOn ? 'on' : ''}" id="moreView" aria-label="More views"><option value="">${moreOn ? moreOn[1] : 'More…'}</option>${more.filter(([k]) => k !== st.view).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></div>
   ${({ board: vBoard, sessions: vSessions, students: vStudents, reception: () => vReception(recModel()), remarks: vRemarks, announce: () => vAnnounce(recModel()), dash: vDash, workload: vWorkload, why: vWhy, notes: () => vNotes(notes) })[st.view]()}`;
 }
 const weekText = () => `${fmtDate(st.settings.weekStart)} – ${fmtDate(E.addDays(st.settings.weekStart, 5))}`;
@@ -1154,6 +1221,8 @@ function bind() {
   on('resetSet', 'click', () => { if (!confirm('Reset cabins, periods, rules, teachers and batch buildings to the defaults?')) return; const w = st.settings.weekStart; st.settings = E.defaultSettings(MASTER); st.settings.weekStart = w; changed(); });
   // schedule
   all('[data-view]', b => b.onclick = () => { st.view = b.dataset.view; render(); });
+  on('moreView', 'change', e => { if (e.target.value) { st.view = e.target.value; render(); } });
+  all('details.menu .menu-list button', b => b.addEventListener('click', () => { const d = b.closest('details'); if (d) d.open = false; }));
   all('[data-pid]', b => b.onclick = () => openEdit(b.dataset.pid));
   on('addSlot', 'click', () => openEdit(null));
   on('dl', 'click', downloadExcel);
