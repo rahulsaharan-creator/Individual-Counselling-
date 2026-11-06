@@ -554,6 +554,28 @@ function viewChecks() {
     ${I.length ? `<div class="notice i"><ul>${I.map(c => `<li>${esc(c.what)}</li>`).join('')}</ul></div>` : ''}
     ${skipped.length ? `<div class="chips" style="margin-top:8px"><span class="muted">Skipped this week:</span>${skipped.map(b => `<span class="chip" style="background:var(--surface2);border-color:var(--line)">${esc(b)}<button type="button" data-unskip="${esc(b)}" aria-label="Stop skipping ${esc(b)}">×</button></span>`).join('')}</div>` : ''}`;
 }
+// the counselling slots as written in the uploaded timetable, before any move
+function viewSlots() {
+  if (!st.tt) return '<p class="muted">Upload the faculty timetable to see who has counselling slots this week.</p>';
+  const SH = shifts(), cells = st.tt.entries.filter(isCounselCell), on = cells.filter(e => SH.includes(e.slot)), off = cells.filter(e => !SH.includes(e.slot));
+  const T = st.settings.teachers, by = {}; for (const e of on) (by[e.t] = by[e.t] || []).push(e);
+  const order = e => E.DAYS.indexOf(e.day) * 10 + E.SLOTS.indexOf(e.slot);
+  const codes = Object.keys(by).sort((a, b) => nat(a, b));
+  const perDay = E.DAYS.map(d => [d, on.filter(e => e.day === d).length]).filter(x => x[1]);
+  const cab = st.settings.cabins.filter(Boolean).length, perPeriod = {}; for (const e of on) perPeriod[e.day + ' ' + e.slot] = (perPeriod[e.day + ' ' + e.slot] || 0) + 1;
+  const pOrd = k => { const [d, s] = k.split(' '); return E.DAYS.indexOf(d) * 10 + E.SLOTS.indexOf(s); }, over = Object.entries(perPeriod).filter(([, n]) => n > cab).sort((a, b) => pOrd(a[0]) - pOrd(b[0])).map(([k, n]) => `${k} (${n})`);
+  const rows = codes.map(t => { const x = T[t] || {}, n = (x.counsel || []).length;
+    return `<tr class="${n ? '' : 'flag'}"><td><b>${esc(t)}</b></td><td>${esc(x.name || '')}</td><td>${esc(x.subject || '')}</td><td class="num"><b>${by[t].length}</b></td>
+      <td style="white-space:normal">${by[t].sort((a, b) => order(a) - order(b)).map(e => `${e.day.slice(0, 3)} ${e.slot}`).join(', ')}</td>
+      <td>${!T[t] ? '<span class="badge err">not in Teachers</span>' : n ? `<span class="badge ok">${n} batch${n > 1 ? 'es' : ''}</span>` : '<span class="badge err">no batches to counsel</span>'}</td></tr>`; }).join('');
+  return `<div class="kpis" style="margin-bottom:14px"><div class="kpi"><b>${on.length}</b><span>Counselling slots this week</span></div><div class="kpi"><b>${codes.length}</b><span>Teachers with a slot</span></div>
+      <div class="kpi"><b>${cab}</b><span>Cabins per period</span></div></div>
+    <p class="muted" style="margin-top:0">Per day: ${perDay.map(([d, n]) => `${d.slice(0, 3)} ${n}`).join(' · ') || 'none'}. As written in the timetable; when a period has more slots than cabins, the planner moves some of them when you calculate.${over.length ? ` Periods with more slots than cabins: ${over.join(', ')}.` : ''}</p>
+    ${off.length ? `<div class="notice w">${off.length} counselling cell${off.length > 1 ? 's are' : ' is'} in periods switched off for counselling and not counted: ${off.map(e => `${e.t} ${e.day.slice(0, 3)} ${e.slot}`).join(', ')}. Switch the period on under Advanced settings → Periods if they should count.</div>` : ''}
+    ${codes.length ? `<div style="margin-bottom:10px"><input class="input sm" id="slFilter" placeholder="Find a teacher" style="width:200px" aria-label="Find a teacher"></div>
+    <div class="tbl scrollbox" style="max-height:480px"><table id="slTable"><thead><tr><th>Short name</th><th>Full name</th><th>Subject</th><th class="num">Slots</th><th>When</th><th>Batches to counsel</th></tr></thead><tbody>${rows}
+      <tr><td colspan="3"><b>Total</b></td><td class="num"><b>${on.length}</b></td><td colspan="2"></td></tr></tbody></table></div>` : `<div class="notice e">No cell in the timetable contains the word “${esc(st.settings.keyword)}”. Check the timetable, or the counselling word under Advanced settings.</div>`}`;
+}
 const counselSlotTeachers = () => st.tt ? new Set(st.tt.entries.filter(e => isCounselCell(e) && shifts().includes(e.slot)).map(e => e.t)) : new Set();
 function viewTeachers() {
   const T = st.settings.teachers, CT = counselSlotTeachers();
@@ -759,12 +781,13 @@ function viewRules() {
 function viewSetup() {
   const s = st.settings, ok = ready();
   const todo = [!st.tt && 'upload the faculty timetable', !st.students && 'upload the student data', !s.cabins.filter(Boolean).length && 'add at least one cabin', !s.weekStart && 'set the Monday of the week', !shifts().length && 'switch on at least one period'].filter(Boolean);
-  const nav = [['sec-files', 'Files'], ['sec-checks', 'Checks'], ['sec-teachers', 'Teachers'], ['sec-btt', 'Batch timetable'], ['sec-adv', 'Advanced settings']];
+  const nav = [['sec-files', 'Files'], ['sec-slots', 'Counselling slots'], ['sec-checks', 'Checks'], ['sec-teachers', 'Teachers'], ['sec-btt', 'Batch timetable'], ['sec-adv', 'Advanced settings']];
   const nl = locks().length; if (nl && st.tt && st.students) todo.push(`fix ${nl} problem${nl > 1 ? 's' : ''} under Checks`);
   const nT = Object.values(s.teachers).filter(t => (t.counsel || []).length).length;
   return head('Set up', 'Upload the timetable each week. The student list and the teachers are set once and kept on this computer. The schedule opens when every check passes.')
   + `<div class="setup"><nav class="toc" aria-label="On this page"><ul>${nav.map(([id, l]) => `<li><a href="#${id}">${l}</a></li>`).join('')}</ul></nav><div class="setup-body">
     <div class="group" id="sec-files"><h2 class="gh">Files</h2><p class="gd">A new faculty timetable each week. The student list only when it changes.</p>${viewUpload()}</div>
+    <div class="group" id="sec-slots"><h2 class="gh">Counselling slots this week</h2><p class="gd">The teachers who have a counselling slot in this week’s faculty timetable.</p>${viewSlots()}</div>
     <div class="group" id="sec-checks"><h2 class="gh">Checks</h2><p class="gd">Everything the planner needs is checked first. Problems in red keep the schedule locked; each one says where it is and how to fix it.</p>${viewChecks()}</div>
     <div class="group" id="sec-teachers"><h2 class="gh">Teachers <span class="badge">${nT} with batches to counsel</span></h2><p class="gd">Set once, then edit here: add, change or delete a teacher. Uploading a Teachers file replaces the whole list, so keep one master file. “Batches to counsel” decides whose students each teacher gets. Senior teachers’ slots are never moved.</p>${viewTeachers()}</div>
     <div class="group" id="sec-btt"><h2 class="gh">Batch timetable</h2><p class="gd">Which batch has class at what time. Morning students are counselled only in evening periods, evening students only in morning periods, and never while their batch has class.</p>${viewBatchTT()}</div>
@@ -1065,7 +1088,7 @@ function bind() {
   all('[data-delb]', b => b.onclick = () => { delete st.settings.batchBuildings[b.dataset.delb]; changed(); });
   on('addB', 'click', () => { const b = (prompt('Batch code, as in the timetable') || '').trim(); if (!b) return; const g = (prompt(`Building for ${b}`) || '').trim(); if (!g) return; st.settings.batchBuildings[b] = g; changed(); });
   const filt = (inp, tbl) => on(inp, 'input', e => { const q = e.target.value.toLowerCase(); document.querySelectorAll(`#${tbl} tbody tr`).forEach(tr => tr.classList.toggle('hide', !tr.textContent.toLowerCase().includes(q) && ![...tr.querySelectorAll('input')].some(i => i.value.toLowerCase().includes(q)))); });
-  filt('tFilter', 'tTable'); filt('bFilter', 'bTable'); filt('btFilter', 'btTable');
+  filt('tFilter', 'tTable'); filt('bFilter', 'bTable'); filt('btFilter', 'btTable'); filt('slFilter', 'slTable');
   on('impT', 'change', e => e.target.files[0] && importTeachers(e.target.files[0]).catch(x => alert(x.message)));
   on('impB', 'change', e => e.target.files[0] && importRoomList(e.target.files[0]).catch(x => alert(x.message)));
   on('expSet', 'click', () => saveFile('counselling-planner-settings.json', JSON.stringify(st.settings, null, 2)));
