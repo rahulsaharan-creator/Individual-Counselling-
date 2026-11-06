@@ -835,7 +835,7 @@ function viewSchedule() {
       <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap"><button class="btn" type="button" data-go="0">Go to set up</button><button class="btn primary" type="button" id="calc4" ${ready() ? '' : 'disabled'}>Calculate schedule</button></div></div>`;
   const r = st.result, cap = st.plan.reduce((a, p) => a + p.k, 0);
   const notes = [...(r.invalid || []).map(x => ['e', x]), ...st.planWarnings.map(x => ['w', x]), ...r.warnings.map(x => ['w', x])];
-  const views = [['board', 'Cabin board'], ['sessions', 'Teacher sessions'], ['students', 'Students'], ['reception', 'Reception'], ['announce', 'Announcements'], ['dash', 'Dashboard'], ['workload', 'Workload'], ['why', `Why · log${r.rows.length < cap ? ' ⚠' : ''}`], ['notes', `Moves and notes · ${st.moves.length + notes.length}`]];
+  const views = [['board', 'Cabin board'], ['sessions', 'Teacher sessions'], ['students', 'Students'], ['reception', 'Reception'], ['remarks', 'Teacher remarks'], ['announce', 'Announcements'], ['dash', 'Dashboard'], ['workload', 'Workload'], ['why', `Why · log${r.rows.length < cap ? ' ⚠' : ''}`], ['notes', `Moves and notes · ${st.moves.length + notes.length}`]];
   return head('Weekly schedule', 'Select a slot on the board to move it, change its students or remove it. The student list updates straight away.',
     `<button class="btn" type="button" id="addSlot">${ICON.plus}Add slot</button><button class="btn" type="button" id="dlTT">${ICON.dl}Updated timetable</button><button class="btn" type="button" id="dlSL">${ICON.dl}Updated student list</button><button class="btn" type="button" id="dlRep">${ICON.dl}Download report</button><button class="btn primary" type="button" id="dl">${ICON.dl}Download Excel</button>`)
   + `<div class="kpis"><div class="kpi"><b>${st.plan.length}</b><span>Counselling slots</span></div><div class="kpi"><b>${r.rows.length}</b><span>Students booked of ${cap} seats</span></div>
@@ -843,7 +843,7 @@ function viewSchedule() {
   ${r.rows.length < cap && st.view !== 'why' ? `<div class="notice i">${cap - r.rows.length} seats are empty. <button class="btn sm" type="button" data-view="why">See why</button></div>` : ''}
   ${notes.some(n => n[0] === 'e') ? `<div class="notice e"><b>Fix before sending</b><ul>${notes.filter(n => n[0] === 'e').map(n => `<li>${esc(n[1])}</li>`).join('')}</ul></div>` : ''}
   <div class="tabs" role="tablist">${views.map(([k, l]) => `<button type="button" role="tab" aria-selected="${st.view === k}" class="${st.view === k ? 'on' : ''}" data-view="${k}">${l}</button>`).join('')}</div>
-  ${({ board: vBoard, sessions: vSessions, students: vStudents, reception: () => vReception(recModel()), announce: () => vAnnounce(recModel()), dash: vDash, workload: vWorkload, why: vWhy, notes: () => vNotes(notes) })[st.view]()}`;
+  ${({ board: vBoard, sessions: vSessions, students: vStudents, reception: () => vReception(recModel()), remarks: vRemarks, announce: () => vAnnounce(recModel()), dash: vDash, workload: vWorkload, why: vWhy, notes: () => vNotes(notes) })[st.view]()}`;
 }
 const weekText = () => `${fmtDate(st.settings.weekStart)} – ${fmtDate(E.addDays(st.settings.weekStart, 5))}`;
 // counts for the reception, dashboard and report: per day, per slot and for the week
@@ -930,7 +930,7 @@ function vDash() {
   <div class="tbl" style="margin-bottom:24px"><table><thead><tr><th>Day</th><th class="num">Slots</th><th class="num">Teachers came</th><th class="num">Late</th><th class="num">Teacher absent</th><th class="num">Students booked</th><th class="num">Present</th><th class="num">Absent</th><th class="num">Not marked</th><th class="num">Parents came</th></tr></thead><tbody>
     ${E.DAYS.filter(d => w.day[d].slots).map(d => dayRow(`<b>${d}</b> <span class="muted">${fmtShort(dayDate(d))}</span>`, w.day[d])).join('')}${dayRow('<b>Week</b>', t, true)}</tbody></table></div>
   <h2 class="gh">Batches this round</h2>
-  <p class="muted">Each batch goes in roll-number order. Round = times its students have been counselled, plus one. Still due = due students not booked this week. Weeks to finish = at this week’s pace.</p>
+  <p class="muted">One round for everyone: nobody is counselled again until every student has had round ${(st.result.coverage || {}).round || 1}. Inside each batch, students go in roll-number order. Still due = students of this round not booked this week. Weeks to finish = at this week’s pace.</p>
   <div class="tbl scrollbox" style="margin-bottom:24px"><table><thead><tr><th>Batch</th><th class="num">Students</th><th class="num">Round</th><th class="num">Due before this week</th><th class="num">Booked this week</th><th class="num">Still due</th><th class="num">Weeks to finish</th><th>Counselled by</th></tr></thead><tbody>
     ${(cov.batches || []).map(b => `<tr class="${b.counsellors.length ? '' : 'flag'}"><td><b>${esc(b.batch)}</b></td><td class="num">${b.students}</td><td class="num">${b.round}</td><td class="num">${b.dueBefore}</td><td class="num">${b.booked}</td><td class="num">${b.dueAfter}</td><td class="num">${b.weeks === null ? '—' : b.weeks}</td><td style="white-space:normal">${b.counsellors.length ? esc(b.counsellors.join(', ')) : '<span class="badge err">no teacher</span>'}</td></tr>`).join('')}
   </tbody></table></div>
@@ -965,6 +965,25 @@ function vBoard() {
   const groups = cabinGroups();
   return `<div class="legend"><span><i style="background:var(--brass)"></i>Moved from its timetable slot</span><span><i style="background:var(--accent)"></i>Edited by you</span><span>The number on each slot is students booked</span></div>`
     + groups.map((g, i) => `<h2 class="gh" style="margin:${i ? 28 : 6}px 0 10px">${esc(bldName(g.b))} <span class="muted" style="font-size:15px;font-weight:400">· cabin${g.cabins.length > 1 ? 's' : ''} ${g.cabins.map(esc).join(', ')} · ${st.plan.filter(p => g.cabins.includes(p.cabin)).length} slots</span></h2>${board(g.cabins, i === 0)}`).join('');
+}
+// teachers type a remark for each student they counselled; saved on this computer straight away
+function vRemarks() {
+  const ts = [...new Set(st.plan.map(p => p.t))].sort(nat), days = E.DAYS.filter(d => st.plan.some(p => p.day === d));
+  if (st.remT && !ts.includes(st.remT)) st.remT = ''; if (!st.remDay || (st.remDay !== 'all' && !days.includes(st.remDay))) st.remDay = 'all';
+  const byP = {}; st.result.rows.forEach(r => (byP[r.pid] = byP[r.pid] || []).push(r));
+  const slots = st.plan.filter(p => (!st.remT || p.t === st.remT) && (st.remDay === 'all' || p.day === st.remDay) && (byP[p.id] || []).length)
+    .sort((a, b) => E.DAYS.indexOf(a.day) - E.DAYS.indexOf(b.day) || E.SLOTS.indexOf(a.shift) - E.SLOTS.indexOf(b.shift) || nat(a.cabin, b.cabin));
+  const shown = slots.flatMap(p => byP[p.id]), done = shown.filter(r => (aStu(r.s.roll).remarks || '').trim()).length;
+  const attBadge = a => a === 'Present' ? '<span class="badge ok">Present</span>' : a === 'Absent' ? '<span class="badge err">Absent</span>' : '<span class="muted">not marked</span>';
+  return `<div class="notice i">Teachers write a short remark for each student they counselled. Remarks are saved on this computer as soon as you leave the box, and go into the report, the saved weekly records and the updated student list (that round's remarks column). Writing a remark marks the student Present if reception has not marked them.</div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
+    <select class="input sm" id="remT" aria-label="Teacher"><option value="">All teachers</option>${ts.map(t => `<option value="${esc(t)}" ${st.remT === t ? 'selected' : ''}>${esc(t)} · ${esc(tName(t))}</option>`).join('')}</select>
+    <select class="input sm" id="remDay" aria-label="Day"><option value="all">All days</option>${days.map(d => `<option value="${d}" ${st.remDay === d ? 'selected' : ''}>${d} ${fmtShort(dayDate(d))}</option>`).join('')}</select>
+    <span class="muted">${done} of ${shown.length} students have a remark</span></div>
+  ${slots.map(p => `<div class="card" style="padding:14px 18px;margin-bottom:14px"><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:baseline"><b style="font-size:16px">${esc(p.t)} · ${esc(tName(p.t))}</b><span class="muted">${p.day} ${fmtShort(p.date)} · ${p.shift} · ${E.hm(p.start)}–${E.hm(p.end)} · Cabin ${esc(p.cabin || '—')}</span></div>
+    <div class="tbl" style="margin-top:10px"><table><thead><tr><th>Time</th><th>Student</th><th>Roll no.</th><th>Batch</th><th>Attendance</th><th style="width:45%">Teacher remarks</th></tr></thead><tbody>
+    ${byP[p.id].sort((a, b) => a.time < b.time ? -1 : 1).map(r => { const a = aStu(r.s.roll), rl = esc(r.s.roll); return `<tr><td>${esc(r.time)}</td><td><b>${esc(r.s.name)}</b></td><td>${rl}</td><td>${esc(r.s.batch)}</td><td>${attBadge(a.att)}</td>
+      <td style="white-space:normal"><textarea class="input sm" data-au="${rl}" data-f="remarks" rows="2" style="width:100%;min-width:260px;resize:vertical" placeholder="What was discussed, what to follow up" aria-label="Teacher remarks for ${esc(r.s.name)}">${esc(a.remarks || '')}</textarea></td></tr>`; }).join('')}</tbody></table></div></div>`).join('') || '<div class="notice i">No booked students for this teacher and day.</div>'}`;
 }
 function vSessions() {
   const w = E.workload(st.tt, E.makeCtx(st.tt, st.settings), st.plan), cnt = st.result.counts;
@@ -1115,6 +1134,8 @@ function bind() {
   all('[data-skip]', el => el.onchange = () => { const x = new Set(st.settings.skipBatches || []); if (el.checked) x.add(el.dataset.skip); else x.delete(el.dataset.skip); st.settings.skipBatches = [...x]; changed(); });
   all('[data-unskip]', b => b.onclick = () => { st.settings.skipBatches = (st.settings.skipBatches || []).filter(x => x !== b.dataset.unskip); changed(); });
   on('dlSL', 'click', () => downloadStudentList(true));
+  on('remT', 'change', e => { st.remT = e.target.value; render(); });
+  on('remDay', 'change', e => { st.remDay = e.target.value; render(); });
   all('[data-sladd]', b => b.onclick = () => addSlotFor(b.dataset.sladd));
   all('[data-slminus]', b => b.onclick = () => { const t = b.dataset.slminus, L = E.weekSlots(st.tt, st.settings).filter(x => x.t === t); if (!L.length) return; const added = L.filter(x => x.added), x = (added.length ? added : L).sort((p, q) => (E.DAYS.indexOf(q.day) * 10 + E.SLOTS.indexOf(q.shift)) - (E.DAYS.indexOf(p.day) * 10 + E.SLOTS.indexOf(p.shift)))[0]; removeSlot(t, x.day, x.shift); });
   all('[data-slrm]', b => b.onclick = () => { const [t, d, q] = b.dataset.slrm.split('|'); removeSlot(t, d, q); });
@@ -1162,7 +1183,7 @@ function bind() {
   });
   all('[data-au]', el => el.onchange = () => {
     const k = el.dataset.au, f = el.dataset.f, cur = st.att.stu[k] || {}, data = { [f]: el.type === 'checkbox' ? el.checked : el.value };
-    const auto = (f === 'in' && el.value) || (f === 'parent' && el.checked) ? 'Present' : (f === 'reason' && el.value ? 'Absent' : '');
+    const auto = (f === 'in' && el.value) || (f === 'parent' && el.checked) || (f === 'remarks' && el.value.trim()) ? 'Present' : (f === 'reason' && el.value ? 'Absent' : '');
     if (auto && !cur.att) { data.att = auto; const sb = el.closest('tr').querySelector('[data-f="att"]'); if (sb) sb.value = auto; }
     setAtt('stu', k, data);
   });
@@ -1170,7 +1191,7 @@ function bind() {
     const rows = st.result.rows, wk = st.settings.weekStart, un = rows.filter(r => !aStu(r.s.roll).att).length;
     if (un && !confirm(`${un} students are not marked present or absent. Count them as counselled?`)) return;
     if (dbRecs().some(x => x.week === wk) && !confirm(`The week of ${fmtDate(wk)} is already saved. Replace it with the current attendance?`)) return;
-    const list = rows.filter(r => aStu(r.s.roll).att !== 'Absent').map(r => ({ roll: r.s.roll, name: r.s.name, batch: r.s.batch, date: r.p.date, week: wk, time: r.time, by: r.p.t, parent: !!aStu(r.s.roll).parent }));
+    const list = rows.filter(r => aStu(r.s.roll).att !== 'Absent').map(r => ({ roll: r.s.roll, name: r.s.name, batch: r.s.batch, date: r.p.date, week: wk, time: r.time, by: r.p.t, parent: !!aStu(r.s.roll).parent, remarks: aStu(r.s.roll).remarks || '' }));
     st.db.weeks[wk] = list; await saveDb(); render(); toast(`${list.length} students saved to the records`); T('save_week', { ok: true, students: list.length });
   });
   on('sSearch', 'input', e => { st.search = e.target.value; const pos = e.target.selectionStart; render(); const i = $('sSearch'); i.focus(); i.setSelectionRange(pos, pos); });
@@ -1222,10 +1243,16 @@ function sheetInOut(x) {
 }
 function sheetAttendance(x) {
   x.sheet('Student Attendance', 'COUNSELLING STUDENT ATTENDANCE', `Week ${weekText()}. Reception marks Present or Absent, and whether a parent came.`,
-    ['Sr.', 'Date', 'Day', 'Time', 'Period', 'Cabin', 'Building', 'Teacher Code', 'Teacher Name', 'Roll No.', 'Student Name', 'Batch', 'In Time', 'Out Time', 'Attendance', 'Parent Came', 'Absent Reason'],
-    [6, 11, 11, 8, 7, 7, 10, 9, 20, 11, 26, 8, 9, 9, 11, 10, 30],
-    st.result.rows.map((r, i) => { const a = aStu(r.s.roll); return [i + 1, fmtDate(r.p.date), r.p.day, r.time, r.p.shift, r.p.cabin, r.p.building || '', r.p.t, tName(r.p.t), r.s.roll, r.s.name, r.s.batch, a.in || '', a.out || '', a.att || '', a.parent ? 'Yes' : (a.att ? 'No' : ''), a.reason || '']; }),
-    { left: [8, 10, 16], bold: [10] });
+    ['Sr.', 'Date', 'Day', 'Time', 'Period', 'Cabin', 'Building', 'Teacher Code', 'Teacher Name', 'Roll No.', 'Student Name', 'Batch', 'In Time', 'Out Time', 'Attendance', 'Parent Came', 'Absent Reason', 'Teacher Remarks'],
+    [6, 11, 11, 8, 7, 7, 10, 9, 20, 11, 26, 8, 9, 9, 11, 10, 30, 45],
+    st.result.rows.map((r, i) => { const a = aStu(r.s.roll); return [i + 1, fmtDate(r.p.date), r.p.day, r.time, r.p.shift, r.p.cabin, r.p.building || '', r.p.t, tName(r.p.t), r.s.roll, r.s.name, r.s.batch, a.in || '', a.out || '', a.att || '', a.parent ? 'Yes' : (a.att ? 'No' : ''), a.reason || '', a.remarks || '']; }),
+    { left: [8, 10, 16, 17], bold: [10] });
+}
+function sheetRemarks(x) {
+  const rows = st.result.rows.filter(r => (aStu(r.s.roll).remarks || '').trim());
+  x.sheet('Counselling Remarks', 'TEACHER REMARKS', `Week ${weekText()}. What each teacher wrote after counselling a student.`,
+    ['Date', 'Day', 'Time', 'Teacher Code', 'Teacher Name', 'Roll No.', 'Student Name', 'Batch', 'Attendance', 'Teacher Remarks'], [11, 11, 8, 9, 20, 11, 26, 8, 11, 70],
+    rows.map(r => { const a = aStu(r.s.roll); return [fmtDate(r.p.date), r.p.day, r.time, r.p.t, tName(r.p.t), r.s.roll, r.s.name, r.s.batch, a.att || '', a.remarks || '']; }), { left: [4, 6, 9] });
 }
 function sheetAbsent(x) {
   const rows = st.result.rows.filter(r => aStu(r.s.roll).att === 'Absent');
@@ -1245,7 +1272,7 @@ async function downloadReport() {
   busy(true, 'Building the report…'); await nextFrame();
   try {
     const wb = new ExcelJS.Workbook(), x = xl(wb);
-    sheetSummary(x); sheetInOut(x); sheetAttendance(x); sheetAbsent(x);
+    sheetSummary(x); sheetInOut(x); sheetAttendance(x); sheetRemarks(x); sheetAbsent(x);
     const buf = await wb.xlsx.writeBuffer(); const t = weekStats().tot;
     T('download_report', { ok: true, booked: t.booked, marked: t.P + t.A });
     await saveFile(`Counselling_Report_${st.settings.weekStart}.xlsx`, new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
@@ -1256,8 +1283,8 @@ async function exportRecords() {
   try {
     const wb = new ExcelJS.Workbook(), x = xl(wb), list = dbRecs().sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : nat(a.roll, b.roll));
     x.sheet('Counselling records', 'COUNSELLING RECORDS', 'Saved from the Counselling Planner. Import this file on another computer, or add the rows to the student file.',
-      ['Roll No.', 'Student Name', 'Batch', 'Date', 'Time', 'Counsellor', 'Parent Came'], [12, 26, 9, 12, 8, 11, 11],
-      list.map(r => [r.roll, r.name, r.batch, fmtDate(r.date), r.time || '', r.by, r.parent ? 'Yes' : 'No']), { left: [1] });
+      ['Roll No.', 'Student Name', 'Batch', 'Date', 'Time', 'Counsellor', 'Parent Came', 'Teacher Remarks'], [12, 26, 9, 12, 8, 11, 11, 60],
+      list.map(r => [r.roll, r.name, r.batch, fmtDate(r.date), r.time || '', r.by, r.parent ? 'Yes' : 'No', r.remarks || '']), { left: [1, 7] });
     const buf = await wb.xlsx.writeBuffer(); T('export_records', { ok: true, rows: list.length });
     await saveFile(`Counselling_Records_${new Date().toISOString().slice(0, 10)}.xlsx`, new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
   } catch (e) { alert('The records could not be exported: ' + e.message); }
@@ -1310,7 +1337,7 @@ async function downloadExcel() {
       (r.coverage.batches || []).map(b => [b.batch, b.students, b.round, b.dueBefore, b.booked, b.dueAfter, b.weeks === null ? '—' : b.weeks, b.counsellors.join(', ')]), { left: [7] });
     sheet('Moves and Notes', 'SLOT MOVES AND NOTES', 'Moves were made because a period had more teachers than cabins.', ['Type', 'Detail'], [16, 110],
       st.moves.map(m => ['Moved', `${m.t} (${tName(m.t)}): ${m.from} → ${m.to}`]).concat(st.planWarnings.map(x => ['Note', x]), r.warnings.map(x => ['Note', x]), (r.invalid || []).map(x => ['Check', x])), { left: [1] });
-    sheetAnnounce(X); sheetInOut(X); sheetAttendance(X);
+    sheetAnnounce(X); sheetInOut(X); sheetAttendance(X); sheetRemarks(X);
     const buf = await wb.xlsx.writeBuffer();
     T('download_excel', { ok: true, booked: r.rows.length, slots: st.plan.length });
     await saveFile(`Counselling_Schedule_${s.weekStart}.xlsx`, new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));

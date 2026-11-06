@@ -468,7 +468,7 @@
       const n = S(t && t.name).toLowerCase().replace(/\s+/g, ' ');
       if (n) byName.set(n, byName.has(n) ? null : c);
     }
-    return v => { const x = S(v); if (!x) return ''; const u = x.toUpperCase().replace(/\s+/g, ''); if (byCode.has(u)) return byCode.get(u); return byName.get(x.toLowerCase().replace(/\s+/g, ' ')) || ''; };
+    return v => { const x = S(v); if (!x) return ''; const pc = /\(([A-Za-z0-9]+)\)\s*$/.exec(x); if (pc && byCode.has(pc[1].toUpperCase())) return byCode.get(pc[1].toUpperCase()); const u = x.toUpperCase().replace(/\s+/g, ''); if (byCode.has(u)) return byCode.get(u); return byName.get(x.toLowerCase().replace(/\s+/g, ' ')) || ''; };
   }
 
   /* Student list: one row per student with the counselling history in the same row.
@@ -478,7 +478,7 @@
      issues: level 'lock' (blocks the schedule until fixed) | 'error' (row not used) | 'warn' | 'info'; each with a fix. */
   const SL = {
     sheet: 'Students', base: ['Roll No', 'Student Name', 'Batch', 'Shift', 'Status'],
-    group: n => n === 1 ? ['Last counselled date', 'Last counsellor', 'Remarks'] : [`${ord(n)} last counselled date`, `${ord(n)} last counsellor`, `Remarks ${n}`]
+    group: n => [`Round ${n} date`, `Round ${n} teacher`, `Round ${n} remarks`]
   };
   const ord = n => n + (n % 10 === 1 && n % 100 !== 11 ? 'st' : n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : 'th');
   function readStudentList(sheets, opts) {
@@ -589,8 +589,9 @@
       ['Batch (required): exactly as in the faculty timetable, for example XA1.', ''],
       ['Shift (required): when the student has classes, Morning or Evening. Morning students are counselled only in the evening, evening students only in the morning.', ''],
       ['Status: Active or Left. Empty means Active. Students marked Left are never booked; their history is kept.', ''],
-      ['Last counselled date, Last counsellor, Remarks: the most recent counselling. Then 2nd last, 3rd last and so on. Add more groups of three columns when needed.', ''],
-      ['Counsellor: the teacher’s short name (as in the timetable) or full name, as in the Teachers section.', ''],
+      ['Round 1 date, Round 1 teacher, Round 1 remarks: the student’s first counselling. Then Round 2, Round 3, up to Round 5 (more rounds are added when needed). Leave a round empty until it has happened.', ''],
+      ['Teacher: the short name (as in the timetable), the full name, or both as “Full Name (SHORT)”, as in the Teachers section.', ''],
+      ['Rounds: nobody is counselled again until every student has had the current round.', ''],
       ['', ''],
       ['What the planner checks', 'h'],
       ['The schedule stays locked until these are fixed: a roll number twice, an empty batch, an empty or wrong Shift, a batch that is not in this week’s timetable.', ''],
@@ -600,18 +601,19 @@
     how.getColumn(1).width = 110;
     const list = data.students || [], extra = data.weekRecs || [], byRoll = {};
     for (const x of extra) (byRoll[x.roll] = byRoll[x.roll] || []).push(x);
-    const hists = list.map(s => { const m = new Map((s.allHistory || s.history || []).map(x => [x.date, x])); for (const x of byRoll[s.roll] || []) if (!m.has(x.date)) m.set(x.date, x); return [...m.values()].sort((a, b) => a.date < b.date ? 1 : -1); });
-    const nG = Math.max(3, ...hists.map(h => h.length));
+    // oldest first: Round 1 is the first counselling, Round 2 the second, and so on (at least 5 rounds of columns)
+    const hists = list.map(s => { const m = new Map((s.allHistory || s.history || []).map(x => [x.date, x])); for (const x of byRoll[s.roll] || []) if (!m.has(x.date)) m.set(x.date, x); return [...m.values()].sort((a, b) => a.date < b.date ? -1 : 1); });
+    const nG = Math.max(5, ...hists.map(h => h.length));
     const cols = SL.base.concat(...Array.from({ length: nG }, (_, i) => SL.group(i + 1)));
     const ws = wb.addWorksheet(SL.sheet, { views: [{ state: 'frozen', ySplit: 1, xSplit: 2 }] });
     const r1 = ws.getRow(1); cols.forEach((c, i) => { const x = r1.getCell(i + 1); x.value = c; x.font = { name: 'Arial', bold: true, color: { argb: 'FFFFFFFF' } }; x.fill = solid(i < 4 ? NAVY : 'FF2F5597'); x.alignment = { vertical: 'middle', wrapText: true }; });
     r1.height = 30; [12, 28, 9, 10, 9].forEach((w, i) => ws.getColumn(i + 1).width = w);
-    for (let g = 0; g < nG; g++) { ws.getColumn(6 + g * 3).width = 13; ws.getColumn(6 + g * 3).numFmt = 'dd-mm-yyyy'; ws.getColumn(7 + g * 3).width = 12; ws.getColumn(8 + g * 3).width = 34; }
+    for (let g = 0; g < nG; g++) { ws.getColumn(6 + g * 3).width = 13; ws.getColumn(6 + g * 3).numFmt = 'dd-mm-yyyy'; ws.getColumn(7 + g * 3).width = 24; ws.getColumn(8 + g * 3).width = 34; }
     ws.getColumn(1).numFmt = '0';
     const tn = data.teachers || {};
     list.forEach((s, i) => {
       const v = [/^\d{1,15}$/.test(s.roll) ? Number(s.roll) : s.roll, s.name, s.batch, s.shift || '', s.status || 'Active'];
-      for (const x of hists[i]) v.push(new Date(x.date + 'T00:00:00Z'), x.by || '', x.remarks || '');
+      for (const x of hists[i]) { const nm = x.by && tn[x.by] && tn[x.by].name; v.push(new Date(x.date + 'T00:00:00Z'), nm ? `${nm} (${x.by})` : (x.by || ''), x.remarks || ''); }
       ws.getRow(i + 2).values = v;
     });
     const n = Math.max(20000, list.length + 5000);
@@ -933,12 +935,14 @@
       if (!byBatch.has(s.batch)) byBatch.set(s.batch, []); byBatch.get(s.batch).push(s);
     }
     const rollCmp = (a, b) => a.roll.length - b.roll.length || (a.roll < b.roll ? -1 : a.roll > b.roll ? 1 : 0);
+    // One round for everyone: no student is counselled again until every student the planner can book has had this round.
+    // Students who can never be booked (batch not in the timetable, or no teacher counsels the batch) do not hold the round back.
+    const counselledB = new Set(); for (const t of Object.keys(T)) for (const b of counselOf(t)) counselledB.add(b);
+    const pool = [...byBatch].filter(([b]) => ctx.occ.has(b) && counselledB.has(b)).flatMap(([, a]) => a);
+    const roundMin = pool.length ? Math.min(...pool.map(s => s.times)) : 0;
     const batchMin = {}, rank = new Map();
-    for (const [b, arr] of byBatch) {
-      arr.sort(rollCmp); batchMin[b] = Math.min(...arr.map(s => s.times));
-      let i = 0, j = 0; for (const s of arr) rank.set(s.roll, s.times <= batchMin[b] ? i++ : j++);
-    }
-    const due = s => s.times <= batchMin[s.batch];
+    for (const [b, arr] of byBatch) { arr.sort(rollCmp); batchMin[b] = roundMin; let i = 0; for (const s of arr) if (s.times <= roundMin) rank.set(s.roll, i++); }
+    const due = s => s.times <= roundMin;
     const shiftOk = (s, p) => s.shift === 'Morning' ? p.shift[0] === 'E' : s.shift === 'Evening' ? p.shift[0] === 'M' : false;
     const placeOk = (b, p) => ctx.siteOfBatch(b) === p.site;
     const busyAt = (b, p) => ctx.occ.has(b) && ctx.occ.get(b).has(p.day + '|' + p.shift);
@@ -973,15 +977,16 @@
         for (const s of arr) {
           if (!shiftOk(s, p)) { note(Tr.stu, s.roll, 'sameShift'); continue; }
           if (s.thisWeek && s.thisWeek.length) { note(Tr.stu, s.roll, 'doneThisWeek'); continue; }
-          list.push({ s, d: due(s) ? 0 : 1, rel: s.times - batchMin[b], q: rank.get(s.roll) }); open++;
+          if (!due(s)) { note(Tr.stu, s.roll, 'roundDone'); continue; }
+          list.push({ s, d: 0, rel: 0, q: rank.get(s.roll) }); open++;
         }
         Tr.batch.set(b, [open ? 'open' : 'sameShift', n]);
       }
       list.sort((a, b) => a.d - b.d || a.rel - b.rel || a.q - b.q || (a.s.batch < b.s.batch ? -1 : a.s.batch > b.s.batch ? 1 : 0) || rollCmp(a.s, b.s));
       return { p, list };
     });
-    // pass 1: students due this round; pass 2: the next round of the same batches (from the first roll number again)
-    const passes = [{ due: true, tag: '' }, { due: false, tag: 'next round' }], passCount = [0, 0];
+    // only students due in this round are booked; a seat stays empty rather than start the next round early
+    const passes = [{ due: true, tag: '' }], passCount = [0];
     passes.forEach((ps, pi) => {
       const ok = c => !used.has(c.s.roll) && (!ps.due || c.d === 0);
       const order = cand.filter(x => (count.get(x.p.id) || 0) < x.p.k).map(x => [x, x.list.filter(ok).length]).sort((a, b) => a[1] - b[1]).map(a => a[0]);
@@ -1006,11 +1011,11 @@
     // coverage per batch
     const batches = [...byBatch].map(([b, arr]) => {
       const dueBefore = arr.filter(due).length, booked = arr.filter(s => used.has(s.roll)).length, bookedDue = arr.filter(s => used.has(s.roll) && due(s)).length, dueAfter = dueBefore - bookedDue;
-      return { batch: b, students: arr.length, round: batchMin[b] + 1, dueBefore, booked, dueAfter, weeks: dueAfter ? (booked ? Math.ceil(dueAfter / booked) : null) : 0,
+      return { batch: b, students: arr.length, round: roundMin + 1, dueBefore, booked, dueAfter, weeks: dueAfter ? (booked ? Math.ceil(dueAfter / booked) : null) : 0,
         counsellors: Object.keys(T).filter(t => counselOf(t).has(b)), inTimetable: ctx.occ.has(b), never: arr.filter(s => !s.times).length };
     }).sort((a, b) => nat(a.batch, b.batch));
     const all = [...byBatch.values()].flat();
-    const coverage = { active: all.length, done: all.filter(s => s.times > 0).length, byClass: {}, roundDone: all.filter(s => !due(s)).length, reachable: all.length, byGroup: {}, round: 1, left: leftN, skipped: skipN, batches };
+    const coverage = { active: all.length, done: all.filter(s => s.times > 0).length, byClass: {}, roundDone: all.filter(s => !due(s)).length, reachable: all.length, byGroup: {}, round: roundMin + 1, pool: pool.length, poolDue: pool.filter(due).length, left: leftN, skipped: skipN, batches };
     for (const s of all) { const c = s.batch, x = coverage.byClass[c] || (coverage.byClass[c] = { active: 0, done: 0 }); x.active++; if (s.times > 0) x.done++; }
     const slotLog = plan.map(p => {
       const Tt = trace[p.id] || { batch: new Map(), stu: new Map(), note: '' }, bz = {}, sz = {};
@@ -1035,6 +1040,7 @@
     sameShift: 'study in this shift (counselling is only in the opposite shift)',
     doneThisWeek: 'already counselled earlier this week',
     bookedElsewhere: 'already booked with another teacher this week',
+    roundDone: 'already counselled in this round; they wait until every student has had this round',
     seatsFull: 'slot was already full'
   };
   // level: ok | warn | fail
@@ -1059,11 +1065,11 @@
     if (!result) { add('Matching', 'fail', 'The schedule has not been calculated yet.'); return L; }
     add('Counselling slots', plan.length ? 'ok' : 'fail', `${pl(plan.length, 'slot')} planned with ${plan.reduce((a, p) => a + p.k, 0)} seats; ${pl(moves.length, 'slot')} moved to a free cabin.`, planWarnings);
     const c = result.coverage, B = c.batches || [];
-    add('Rounds', 'ok', `Each batch goes in roll-number order. ${c.reachable - c.roundDone} of ${c.reachable} students are due in their batch's current round and go first.${c.left ? ` ${c.left} marked Left.` : ''}${c.skipped ? ` ${c.skipped} in batches skipped this week.` : ''}`,
-      B.map(b => `${b.batch}: round ${b.round}, ${b.dueBefore} of ${b.students} due, ${b.booked} booked this week${b.dueAfter ? `, ${b.dueAfter} still due after this week` : ', round finished'}${b.counsellors.length ? '' : ' (no teacher counsels this batch)'}`));
+    add('Rounds', 'ok', `Round ${c.round} for everyone: ${c.poolDue} of ${c.pool} students are still due in round ${c.round}. Nobody is counselled again until all of them have had this round. Inside each batch, students go in roll-number order.${c.left ? ` ${c.left} marked Left.` : ''}${c.skipped ? ` ${c.skipped} in batches skipped this week.` : ''}`,
+      B.map(b => `${b.batch}: ${b.dueBefore} of ${b.students} still due in round ${b.round}, ${b.booked} booked this week${b.dueAfter ? `, ${b.dueAfter} still due after this week` : ', round finished for this batch'}${b.counsellors.length ? '' : ' (no teacher counsels this batch, so it does not hold the round back)'}`));
     if (result.dropped && result.dropped.length) add('Kept bookings', 'warn', `${pl(result.dropped.length, 'booking')} taken out because they are no longer valid.`, result.dropped);
     const booked = result.rows.length, cap = plan.reduce((a, p) => a + p.k, 0), P = result.passes || [];
-    add('Matching', booked ? (booked < cap ? 'warn' : 'ok') : 'fail', `${booked} of ${cap} seats filled.${P.length ? ` ${P[0].booked} with students due this round, ${P[1] ? P[1].booked : 0} from the next round.` : ''}`);
+    add('Matching', booked ? (booked < cap ? 'warn' : 'ok') : 'fail', `${booked} of ${cap} seats filled.${P.length ? ` ${P[0].booked} with students due in this round.` : ''}`);
     for (const x of result.slotLog) {
       const d = [`Batches to counsel: ${x.counsel.length ? x.counsel.join(', ') : 'none'}.`];
       for (const [w, v] of Object.entries(x.batches)) if (w !== 'open') d.push(`${pl(v.batches.length, 'batch')} out (${v.students} students): ${B_WHY[w] || w}. ${v.batches.slice(0, 12).join(', ')}${v.batches.length > 12 ? ' …' : ''}`);
