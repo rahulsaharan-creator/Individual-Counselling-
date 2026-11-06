@@ -356,8 +356,9 @@ async function onTimetable(file) {
   busy(true, 'Reading the timetable…'); await nextFrame();
   try {
     const wb = await readWorkbook(file); let tt = null, lastErr = null;
-    for (const n of wb.SheetNames) { try { tt = E.parseTimetable(rowsOf(wb.Sheets[n])); break; } catch (e) { lastErr = e; } }
+    for (const n of wb.SheetNames) { try { tt = E.parseTimetable(rowsOf(wb.Sheets[n])); const rg = XLSX.utils.decode_range(wb.Sheets[n]['!ref'] || 'A1'); Object.assign(tt.grid, { sheet: n, r0: rg.s.r, c0: rg.s.c }); break; } catch (e) { lastErr = e; } }
     if (!tt) throw lastErr;
+    try { await idb.set('ttFile', { buf: await file.arrayBuffer(), name: file.name }); } catch (e) {}
     st.tt = tt; st.ttName = file.name; if (tt.weekStart) st.settings.weekStart = tt.weekStart;
     saveSettings(); await idb.set('tt', { tt, name: file.name }); rebuildStudents(); await loadAtt(); resetSchedule(); toast('Timetable loaded');
     T('upload_timetable', { ok: true, teachers: (tt.teachers || []).length, size_kb: Math.round(file.size / 1024) });
@@ -494,6 +495,82 @@ function render() {
 const head = (title, lead, right = '') => `<div class="pagehead"><div><h1>${title}</h1><p class="lead">${lead}</p></div>${right ? `<div style="display:flex;gap:8px;flex-wrap:wrap">${right}</div>` : ''}</div>`;
 const section = (title, desc, body, id = '') => `<section class="section"${id ? ` id="${id}"` : ''}><div><h2>${title}</h2>${[].concat(desc).map(d => `<p class="desc">${d}</p>`).join('')}</div><div style="min-width:0">${body}</div></section>`;
 
+/* ---------- teacher batches ---------- */
+const isCounselCell = e => (e.room + ' ' + e.subj).toLowerCase().includes(st.settings.keyword.toLowerCase());
+const tbKnown = () => ({
+  teachers: [...new Set([...(st.tt ? st.tt.teachers : []), ...Object.keys(st.settings.teachers)])],
+  ttBatches: st.tt ? [...new Set(st.tt.entries.filter(e => e.room && !isCounselCell(e)).map(e => e.room))] : [],
+  studentBatches: st.students ? [...new Set([...st.students.values()].map(x => x.batch))] : [],
+  counselTeachers: st.tt ? [...new Set(st.tt.entries.filter(isCounselCell).map(e => e.t))] : []
+});
+const normB = v => String(v || '').toUpperCase().replace(/\s+/g, '');
+function setTeacherBatches(t, list) {
+  const others = (st.settings.teacherBatches || []).filter(x => x.t !== t);
+  st.settings.teacherBatches = others.concat([...new Set(list.map(normB).filter(Boolean))].map(b => ({ t, b })));
+}
+function viewTB() {
+  const s = st.settings, pairs = s.teacherBatches || [], by = {};
+  for (const x of pairs) (by[x.t] = by[x.t] || []).push(x.b);
+  const k = tbKnown(), CT = new Set(k.counselTeachers), checks = (st.tbIssues || []).concat(E.checkTeacherBatches(pairs.map(x => ({ ...x, row: null })), k));
+  const teachers = k.teachers.slice().sort((a, b) => (CT.has(b) - CT.has(a)) || (a < b ? -1 : 1));
+  const rows = Object.keys(by).sort().map(t => `<tr data-tbt="${esc(t)}"><td><b>${esc(t)}</b> <span class="muted">${esc(tName(t))}</span>${CT.has(t) ? '' : ' <span class="badge">no slot this week</span>'}</td>
+    <td><input class="input sm" data-tbb value="${esc(by[t].join(', '))}" style="width:100%" aria-label="Batches of ${esc(t)}"></td>
+    <td><button class="btn ghost icon-btn danger" type="button" data-tbdel="${esc(t)}" aria-label="Remove ${esc(t)}">${ICON.del}</button></td></tr>`).join('');
+  const li = i => `<li>${i.row ? 'Row ' + i.row + ': ' : ''}${esc(i.msg)}</li>`, warn = checks.filter(i => i.level !== 'info'), info = checks.filter(i => i.level === 'info');
+  return `<div class="optline">${toggle('optAssigned', s.assignedOnly !== false, 'Only assigned batches')}<div><b>Only assigned batches</b><span class="muted">On: a listed teacher gets students only from their batches, and a seat stays empty when none of them is free. Off: their batches go first, then the matching rules fill the rest.</span></div></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0"><label class="btn sm" style="cursor:pointer">Upload teacher batches<input type="file" accept=".xlsx" id="impTB" class="hide"></label>
+      <button class="btn sm" type="button" id="dlTB" ${pairs.length ? '' : 'disabled'}>${ICON.dl}Download this list</button><button class="btn sm" type="button" id="dlTBT">${ICON.dl}Empty template</button>
+      ${pairs.length ? '<button class="btn ghost danger sm" type="button" id="clrTB">Clear the list</button>' : ''}</div>
+    ${warn.length || info.length ? `<div class="notice ${checks.some(i => i.level === 'error') ? 'e' : warn.length ? 'w' : 'i'}"><b>Checks</b><ul>${warn.concat(info).slice(0, 60).map(li).join('')}</ul></div>` : ''}
+    <div class="addrow" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"><select class="input sm" id="tbT" aria-label="Teacher">${teachers.map(t => `<option value="${esc(t)}">${esc(t)} · ${esc(tName(t))}${CT.has(t) ? ' · has a slot' : ''}</option>`).join('')}</select>
+      <input class="input sm" id="tbB" placeholder="Batches, e.g. XA1, XA2" style="width:200px" aria-label="Batches"><button class="btn sm" type="button" id="addTB">${ICON.plus}Add</button></div>
+    ${rows ? `<div class="tbl scrollbox"><table><thead><tr><th>Teacher</th><th>Batches (separate with commas)</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">No teacher batches yet. Every teacher uses the matching rules.</p>'}`;
+}
+async function importTeacherBatches(file) {
+  const wb = await readWorkbook(file);
+  const p = E.readTeacherBatches(wb.SheetNames.map(n => ({ name: n, rows: rowsOf(wb.Sheets[n]) })), tbKnown());
+  if (!p.ok) { T('upload_teacher_batches', { ok: false }); alert(p.fatal); return; }
+  const had = (st.settings.teacherBatches || []).length;
+  if (had && !confirm(`Replace the ${had} teacher–batch pairs in the list with the ${p.pairs.length} from this file?`)) return;
+  st.settings.teacherBatches = p.pairs; st.tbIssues = p.issues.filter(i => i.row);
+  T('upload_teacher_batches', { ok: true, pairs: p.pairs.length, errors: p.issues.filter(i => i.level === 'error').length });
+  toast(`${p.pairs.length} teacher–batch pairs loaded`); changed();
+}
+async function downloadTB(empty) {
+  try {
+    const wb = new ExcelJS.Workbook(), k = tbKnown();
+    E.fillTeacherBatchTemplate(wb, { teachers: st.settings.teachers, pairs: empty ? [] : (st.settings.teacherBatches || []).slice().sort((a, b) => a.t < b.t ? -1 : a.t > b.t ? 1 : nat(a.b, b.b)), batches: k.ttBatches });
+    const buf = await wb.xlsx.writeBuffer(); T('download_teacher_batches', { ok: true, empty: !!empty });
+    await saveFile(empty ? 'Counselling_Teacher_Batches_Template.xlsx' : `Counselling_Teacher_Batches_${new Date().toISOString().slice(0, 10)}.xlsx`, new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  } catch (e) { alert('The file could not be made: ' + e.message); }
+}
+/* ---------- the updated faculty timetable: the uploaded file with only the moved counselling cells changed ---------- */
+async function downloadTimetable() {
+  const f = await idb.get('ttFile'); if (!f || !st.tt || !st.tt.grid) return alert('Upload the faculty timetable again, then download the updated timetable. (The original file is kept only from now on.)');
+  if (!/\.xlsx$/i.test(f.name)) return alert('The updated timetable can only be made from an .xlsx timetable. Save the timetable as .xlsx and upload it again.');
+  busy(true, 'Writing the updated timetable…'); await nextFrame();
+  try {
+    const ed = E.timetableEdits(st.tt, st.plan, st.settings); if (!ed.ok) throw new Error(ed.msg);
+    const wb = new ExcelJS.Workbook(); await wb.xlsx.load(f.buf);
+    const ws = wb.getWorksheet(ed.sheet) || wb.worksheets[0];
+    for (const e of ed.edits) {
+      let c = ws.getCell(ed.r0 + e.r + 1, ed.c0 + e.c + 1);
+      if (c.isMerged) { try { const m = ws._merges[c.master.address]; if (m) ws.unMergeCells(m.range || m.shortRange); } catch (x) {} c = ws.getCell(ed.r0 + e.r + 1, ed.c0 + e.c + 1); }
+      c.value = e.value;
+      if (e.kind === 'new') c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE699' } };
+    }
+    const cw = wb.addWorksheet('Counselling changes');
+    cw.addRow(['Teacher', 'Name', 'Change', 'From', 'To']).font = { bold: true };
+    ed.changes.forEach(x => cw.addRow([x.t, tName(x.t), x.what, x.from, x.to]));
+    ed.problems.forEach(x => cw.addRow(['', '', 'Check', x]));
+    if (!ed.changes.length) cw.addRow(['', '', 'No counselling slot was moved, added or removed.']);
+    [10, 26, 10, 18, 18].forEach((w, i) => cw.getColumn(i + 1).width = w);
+    const buf = await wb.xlsx.writeBuffer(); T('download_timetable', { ok: true, changes: ed.changes.length, problems: ed.problems.length });
+    await saveFile(f.name.replace(/\.xlsx$/i, '') + ` - updated ${new Date().toISOString().slice(0, 10)}.xlsx`, new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+    if (ed.problems.length) alert(ed.problems.join('\n'));
+  } catch (e) { T('download_timetable', { ok: false }); alert('The updated timetable could not be made: ' + e.message); }
+  busy(false);
+}
 // the row-by-row checks from the last student upload
 function recChecks() {
   const I = st.recIssues; if (!I || !I.length) return '';
@@ -606,7 +683,8 @@ function viewRules() {
     <datalist id="bldList">${s.knownBuildings.concat(['M3 old']).map(b => `<option value="${esc(b)}">`).join('')}</datalist>`;
   const backup = `<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" type="button" id="expSet">Export settings</button>
     <label class="btn" style="cursor:pointer">Import settings<input type="file" accept=".json" id="impSet" class="hide"></label><button class="btn danger" type="button" id="resetSet">Reset everything to defaults</button></div>`;
-  return `<div class="card">${section('Matching rules', ['Rules decide which batches a teacher may get. A batch allowed by any rule can be booked; a higher rule only breaks ties.', 'Always true: the student has no class then (by default, only in the shift opposite to their classes), is on the same campus and the same class group, and is booked once a week.', 'Then, in this order: students due this round, students who have not met the teacher, the higher rule, the student counselled longest ago. Slots with the fewest free students choose first, so every teacher gets students when any are free.'], rules, 'rules')}
+  return `<div class="card">${section(`Teacher batches <span class="badge">${new Set((s.teacherBatches || []).map(x => x.t)).size}</span>`, ['Optional. Decide which batches each teacher counsels. A teacher can have several batches, and a batch several teachers.', 'Upload the teacher batches Excel or edit the list here. Teachers not listed use the matching rules below.'], viewTB(), 'sec-tb')}
+    ${section('Matching rules', ['Rules decide which batches a teacher may get. A batch allowed by any rule can be booked; a higher rule only breaks ties.', 'Always true: the student has no class then (by default, only in the shift opposite to their classes), is on the same campus and the same class group, and is booked once a week.', 'Then, in this order: students due this round, students who have not met the teacher, the higher rule, the student counselled longest ago. Slots with the fewest free students choose first, so every teacher gets students when any are free.'], rules, 'rules')}
     ${section('Matching limits', 'These apply to every rule.', cons, 'sec-limits')}
     ${section('Student count by building', ['Each slot starts with the students-per-slot number.', 'It loses 1 for each neighbouring class held in one of these buildings, because the teacher needs time to walk over.'], red, 'sec-building')}
     ${section(`Teachers <span class="badge">${tRows.length}</span>`, ['Class decides which students a teacher can get under “same class group” and “teacher of class” rules.', 'FTP = new teachers (Faculty Training Program), who counsel 11th students. A teacher with no class here and no classes in the timetable is treated as FTP.'], teach, 'sec-teachers')}
@@ -617,7 +695,7 @@ function viewRules() {
 function viewSetup() {
   const s = st.settings, ok = ready();
   const todo = [!st.tt && 'upload the faculty timetable', !st.students && 'upload the student data', !s.cabins.filter(Boolean).length && 'add at least one cabin', !s.weekStart && 'set the Monday of the week', !shifts().length && 'switch on at least one period'].filter(Boolean);
-  const nav = [['sec-files', 'Files'], ['sec-week', 'Week and cabins'], ['rules', 'Matching rules'], ['sec-limits', 'Matching limits'], ['sec-building', 'Building rule'], ['sec-teachers', 'Teachers'], ['sec-batches', 'Batch buildings'], ['sec-backup', 'Backup']];
+  const nav = [['sec-files', 'Files'], ['sec-week', 'Week and cabins'], ['sec-tb', 'Teacher batches'], ['rules', 'Matching rules'], ['sec-limits', 'Matching limits'], ['sec-building', 'Building rule'], ['sec-teachers', 'Teachers'], ['sec-batches', 'Batch buildings'], ['sec-backup', 'Backup']];
   return head('Set up the week', 'Upload this week’s files, check cabins and periods, and adjust rules when something changes. Everything is saved in this browser; nothing is sent to a server.')
   + `<div class="setup"><nav class="toc" aria-label="On this page"><ul>${nav.map(([id, l]) => `<li><a href="#${id}">${l}</a></li>`).join('')}</ul></nav><div class="setup-body">
     <div class="group" id="sec-files"><h2 class="gh">Files</h2><p class="gd">Upload a new timetable each week. The student file only needs updating when it changes.</p>${viewUpload()}</div>
@@ -636,7 +714,7 @@ function viewSchedule() {
   const notes = [...(r.invalid || []).map(x => ['e', x]), ...st.planWarnings.map(x => ['w', x]), ...r.warnings.map(x => ['w', x])];
   const views = [['board', 'Cabin board'], ['sessions', 'Teacher sessions'], ['students', 'Students'], ['reception', 'Reception'], ['announce', 'Announcements'], ['dash', 'Dashboard'], ['workload', 'Workload'], ['why', `Why · log${r.rows.length < cap ? ' ⚠' : ''}`], ['notes', `Moves and notes · ${st.moves.length + notes.length}`]];
   return head('Weekly schedule', 'Select a slot on the board to move it, change its students or remove it. The student list updates straight away.',
-    `<button class="btn" type="button" id="addSlot">${ICON.plus}Add slot</button><button class="btn" type="button" id="dlRep">${ICON.dl}Download report</button><button class="btn primary" type="button" id="dl">${ICON.dl}Download Excel</button>`)
+    `<button class="btn" type="button" id="addSlot">${ICON.plus}Add slot</button><button class="btn" type="button" id="dlTT">${ICON.dl}Updated timetable</button><button class="btn" type="button" id="dlRep">${ICON.dl}Download report</button><button class="btn primary" type="button" id="dl">${ICON.dl}Download Excel</button>`)
   + `<div class="kpis"><div class="kpi"><b>${st.plan.length}</b><span>Counselling slots</span></div><div class="kpi"><b>${r.rows.length}</b><span>Students booked of ${cap} seats</span></div>
      <div class="kpi"><b>${st.moves.length}</b><span>Slots moved to a free cabin</span></div><div class="kpi"><b>${r.passes && r.passes[0] ? r.passes[0].booked : r.rows.length}</b><span>Booked from students due this round</span></div></div>
   ${r.rows.length < cap && st.view !== 'why' ? `<div class="notice i">${cap - r.rows.length} seats are empty. <button class="btn sm" type="button" data-view="why">See why</button></div>` : ''}
@@ -869,7 +947,7 @@ function bind() {
     z.addEventListener('dragover', e => { e.preventDefault(); z.classList.add('over'); }); z.addEventListener('dragleave', () => z.classList.remove('over'));
     z.addEventListener('drop', e => { e.preventDefault(); z.classList.remove('over'); const f = e.dataTransfer.files[0]; if (f) (z.dataset.drop === 'tt' ? onTimetable : onStudents)(f); });
   });
-  on('clearData', 'click', async () => { if (!confirm('Remove the uploaded timetable and student data from this browser?')) return; await idb.del('tt'); await idb.del('rec'); Object.assign(st, { tt: null, records: null, recMeta: null, recIssues: null, students: null }); resetSchedule(); render(); });
+  on('clearData', 'click', async () => { if (!confirm('Remove the uploaded timetable and student data from this browser?')) return; await idb.del('tt'); await idb.del('ttFile'); await idb.del('rec'); Object.assign(st, { tt: null, records: null, recMeta: null, recIssues: null, students: null }); resetSchedule(); render(); });
   // week & cabins
   on('addCab', 'click', () => { const v = $('newCab').value.trim(); if (!v) return; if (st.settings.cabins.includes(v)) return toast('That cabin is already listed'); st.settings.cabins.push(v); (st.settings.cabinBuildings = st.settings.cabinBuildings || {})[v] = $('newCabB').value; changed(); if (st.plan) toast('Recalculate to use the new cabin'); });
   all('[data-cabb]', el => el.onchange = () => { (st.settings.cabinBuildings = st.settings.cabinBuildings || {})[el.dataset.cabb] = el.value; changed(false); if (st.plan) toast('Recalculate to apply the cabin buildings'); });
@@ -924,6 +1002,14 @@ function bind() {
   on('dl', 'click', downloadExcel);
   on('dlRep', 'click', downloadReport);
   on('dlTpl', 'click', downloadTemplate);
+  on('dlTT', 'click', downloadTimetable);
+  on('impTB', 'change', e => e.target.files[0] && importTeacherBatches(e.target.files[0]).catch(x => alert(x.message)));
+  on('dlTB', 'click', () => downloadTB(false)); on('dlTBT', 'click', () => downloadTB(true));
+  on('clrTB', 'click', () => { if (!confirm('Remove every teacher–batch pair? Teachers then use the matching rules.')) return; st.settings.teacherBatches = []; st.tbIssues = null; changed(); });
+  on('optAssigned', 'change', e => { st.settings.assignedOnly = e.target.checked; changed(); });
+  on('addTB', 'click', () => { const t = $('tbT').value, v = $('tbB').value; if (!t || !v.trim()) return toast('Choose a teacher and type the batches'); const cur = (st.settings.teacherBatches || []).filter(x => x.t === t).map(x => x.b); setTeacherBatches(t, cur.concat(v.split(/[,;\/\s]+/))); changed(); });
+  all('[data-tbb]', el => el.onchange = () => { setTeacherBatches(el.closest('[data-tbt]').dataset.tbt, el.value.split(/[,;\/\s]+/)); changed(); });
+  all('[data-tbdel]', b => b.onclick = () => { setTeacherBatches(b.dataset.tbdel, []); changed(); });
   on('dlChecks', 'click', () => saveFile(`Student_File_Checks_${new Date().toISOString().slice(0, 10)}.txt`, new Blob([(st.recIssues || []).map(i => `${i.level.toUpperCase()}\t${i.sheet}${i.row ? ' row ' + i.row : ''}\t${i.msg}`).join('\n')], { type: 'text/plain' })));
   on('logAll', 'click', () => { st.logAll = !st.logAll; render(); });
   on('dlLog', 'click', () => { T('download_log', { ok: true }); saveFile(`Counselling_Why_Log_${st.settings.weekStart}.txt`, new Blob([E.logText(whyLog())], { type: 'text/plain' })); });

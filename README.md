@@ -36,6 +36,10 @@ Student file: only the student template is accepted (**Set up → Download stude
 - **Counselling History** sheet, one row per counselling already held: Roll No, Date, Counsellor Code (timetable short code), Result (Done or Absent).
 - Every upload is checked row by row. Rows with errors are not used and are listed with their row numbers; warnings are listed but do not stop the upload.
 
+Teacher batches (optional): **Set up → Teacher batches**. Upload the teacher batches Excel (sheet **Teacher Batches**: Teacher Code, Teacher Name, Batch, Note; one row per teacher and batch) or edit the list on the page. With **Only assigned batches** on, a listed teacher gets students only from their batches; off, their batches go first and the rules fill the rest. Unlisted teachers use the matching rules.
+
+Updated timetable: **Weekly schedule → Updated timetable** downloads the uploaded faculty timetable with only the moved, added or removed counselling cells changed (new cells in yellow) and a **Counselling changes** sheet. Everything else, including formatting and merged cells, stays as uploaded.
+
 Settings, the last schedule, attendance and the counselling records are saved only on this computer, in this browser. Nothing is sent to a server. Do reception and planning in the same browser on the same computer, and export the records from the Dashboard every week to keep a copy. Use **Rules and lists → Export settings** to copy them to another computer.
 
 ## Changing the code
