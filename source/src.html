@@ -289,6 +289,13 @@ const st = { step: 0, view: 'board', settings: null, tt: null, ttName: '', recor
 const CLASSES = ['', '11th', '12th', 'Target', 'FTP'];
 const BLDS = () => [...new Set(st.settings.knownBuildings.concat(['M3 old']))];
 
+function migrateTeachers(m) {
+  const T = m.teachers || (m.teachers = {}), sen = String(m.seniorClasses || '').split(',').map(v => v.trim()).filter(Boolean);
+  for (const x of m.teacherBatches || []) { const t = T[x.t] || (T[x.t] = { name: '', subject: '' }); if (!t.counselMigrated) t.counsel = [...new Set((t.counsel || []).concat(x.b))]; }
+  for (const t of Object.values(T)) { t.counselMigrated = true; if (!Array.isArray(t.counsel)) t.counsel = []; if (!Array.isArray(t.taught)) t.taught = []; if (t.senior === undefined) t.senior = sen.includes(t.cls || ''); }
+  if (!Array.isArray(m.skipBatches)) m.skipBatches = [];
+  return m;
+}
 function loadSettings() {
   const d = E.defaultSettings(MASTER);
   try {
@@ -299,10 +306,10 @@ function loadSettings() {
         rules: Array.isArray(s.rules) && s.rules.length ? s.rules : d.rules });
       // settings saved before FTP teachers existed: 11th and 12th now each keep to their own class, and FTP joins 11th
       if (!/FTP/i.test(m.classGroups || '')) m.classGroups = m.classGroups === '11th | Target, 12th' ? '11th, FTP | 12th | Target' : String(m.classGroups || '').split('|').map(g => /11th/.test(g) ? g.trim() + ', FTP' : g.trim()).join(' | ');
-      return m;
+      return migrateTeachers(m);
     }
   } catch (e) {}
-  return d;
+  return migrateTeachers(d);
 }
 /* attendance (per week) and saved counselling records, kept in this browser */
 const slotKey = p => `${p.t}|${p.date || p.day}|${p.shift}`;
@@ -369,15 +376,16 @@ async function onStudents(file) {
   busy(true, 'Reading student data. Large files take a few seconds…'); await nextFrame();
   try {
     const wb = await readWorkbook(file);
-    const p = E.readTemplate(wb.SheetNames.map(n => ({ name: n, rows: rowsOf(wb.Sheets[n]) })), Object.keys(st.settings.teachers), st.settings.weekStart);
+    const p = E.readStudentList(wb.SheetNames.map(n => ({ name: n, rows: rowsOf(wb.Sheets[n]) })), { weekStart: st.settings.weekStart, teachers: st.settings.teachers });
     if (!p.ok) { T('upload_students', { ok: false, template: false, size_kb: Math.round(file.size / 1024) }); busy(false); alert(p.fatal); return; }
-    st.records = p.records.map(r => ({ ...r, date: r.date ? r.date.toISOString().slice(0, 10) : null })); st.recMeta = p.used; st.recName = file.name; st.recIssues = p.issues;
-    await idb.set('rec', { recs: st.records, meta: p.used, name: file.name, issues: p.issues }); rebuildStudents(); resetSchedule(); toast(p.stats.errors ? `Student data loaded; ${p.stats.errors} rows not used` : 'Student data loaded');
-    T('upload_students', { ok: true, students: p.stats.students, history: p.stats.history, errors: p.stats.errors, warnings: p.stats.warnings, size_kb: Math.round(file.size / 1024) });
+    st.v2 = { students: p.students, history: p.history }; st.recMeta = [{ sheet: p.sheet, rows: p.stats.students }]; st.recName = file.name; st.recIssues = p.issues; st.oldRec = false;
+    await idb.set('rec2', { v2: st.v2, meta: st.recMeta, name: file.name, issues: p.issues }); rebuildStudents(); resetSchedule();
+    toast(p.stats.locks ? `Student list loaded; ${p.stats.locks} problem${p.stats.locks > 1 ? 's' : ''} to fix` : 'Student list loaded');
+    T('upload_students', { ok: true, students: p.stats.students, history: p.stats.history, errors: p.stats.errors + p.stats.locks, warnings: p.stats.warnings, size_kb: Math.round(file.size / 1024) });
   } catch (e) { T('upload_students', { ok: false, size_kb: Math.round(file.size / 1024) }); alert(e.message); }
   busy(false); render();
 }
-function rebuildStudents() { st.students = st.records ? E.buildStudents(st.records.map(r => ({ ...r, date: r.date ? new Date(r.date + 'T00:00:00Z') : null })), st.settings.weekStart, dbRecs()) : null; }
+function rebuildStudents() { st.students = st.v2 ? E.buildStudentsV2(st.v2, st.settings.weekStart, dbRecs()) : null; }
 // Reads either layout of the room list: "Batch | Building | Room No." columns, and/or the "Building | Floor | Room | Morning | Evening" grid
 async function importRoomList(file) {
   const wb = await readWorkbook(file); const done = new Set(); const s = st.settings; const rooms = s.batchRooms || (s.batchRooms = {});
@@ -446,7 +454,7 @@ async function importTeachers(file) {
 
 /* ---------- calculation ---------- */
 function resetSchedule() { st.plan = null; st.result = null; st.moves = []; st.planWarnings = []; }
-const ready = () => !!(st.tt && st.students && st.settings.cabins.filter(Boolean).length && st.settings.weekStart && shifts().length);
+const ready = () => !!(st.tt && st.students && st.settings.cabins.filter(Boolean).length && st.settings.weekStart && shifts().length) && !locks().length;
 async function calculate() {
   if (!ready()) return;
   busy(true, 'Calculating the week…'); await nextFrame(); const t0 = performance.now(), again = !!st.plan;
@@ -544,6 +552,83 @@ async function downloadTB(empty) {
     await saveFile(empty ? 'Counselling_Teacher_Batches_Template.xlsx' : `Counselling_Teacher_Batches_${new Date().toISOString().slice(0, 10)}.xlsx`, new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
   } catch (e) { alert('The file could not be made: ' + e.message); }
 }
+/* ---------- Logic v2: input checks, Teachers section, batch timetable ---------- */
+let _chk = null, _chkKey = '';
+function inputChecks() {
+  const key = [st.tt ? st.ttName + st.tt.entries.length : '', st.students ? st.students.size : '', st.recName, JSON.stringify(st.settings.teachers).length, JSON.stringify(st.settings.teachers), (st.settings.skipBatches || []).join(','), st.settings.weekStart, st.settings.cabins.join(','), st.settings.keyword, JSON.stringify(st.settings.counselShifts)].join('|');
+  if (key !== _chkKey) { _chkKey = key; _chk = E.checkInputs({ tt: st.tt, settings: st.settings, students: st.students, fileIssues: st.recIssues || [] }); }
+  return _chk;
+}
+const locks = () => inputChecks().filter(c => c.level === 'lock');
+function viewChecks() {
+  const C = inputChecks(), L = C.filter(c => c.level === 'lock'), W = C.filter(c => c.level === 'warn'), I = C.filter(c => c.level === 'info');
+  const skip = new Set(st.settings.skipBatches || []);
+  const item = c => { const m = /^Batch (\S+) \(\d+ students\) is not in this week/.exec(c.what);
+    return `<li style="margin:6px 0"><b>${esc(c.what)}</b>${c.where ? ` <span class="muted">· ${esc(c.where)}</span>` : ''}${c.fix ? `<br><span>How to fix: ${esc(c.fix)}</span>` : ''}${m ? `<br><label style="display:inline-flex;gap:6px;align-items:center;margin-top:4px;cursor:pointer"><input type="checkbox" data-skip="${esc(m[1])}"> Skip ${esc(m[1])} this week</label>` : ''}</li>`; };
+  const skipped = [...skip].sort(nat);
+  return `${L.length ? `<div class="notice e"><b>${L.length} problem${L.length > 1 ? 's' : ''} to fix before the schedule can be made</b><ul>${L.slice(0, 80).map(item).join('')}</ul>${L.length > 80 ? `<p>… and ${L.length - 80} more.</p>` : ''}</div>` : (st.tt && st.students ? '<div class="notice i"><b>All inputs are correct.</b> The schedule can be calculated.</div>' : '')}
+    ${W.length ? `<details class="notice w" ${L.length ? '' : 'open'}><summary style="cursor:pointer"><b>${W.length} warning${W.length > 1 ? 's' : ''}</b> · they do not stop the schedule</summary><ul>${W.slice(0, 120).map(item).join('')}</ul></details>` : ''}
+    ${I.length ? `<div class="notice i"><ul>${I.map(c => `<li>${esc(c.what)}</li>`).join('')}</ul></div>` : ''}
+    ${skipped.length ? `<div class="chips" style="margin-top:8px"><span class="muted">Skipped this week:</span>${skipped.map(b => `<span class="chip" style="background:var(--surface2);border-color:var(--line)">${esc(b)}<button type="button" data-unskip="${esc(b)}" aria-label="Stop skipping ${esc(b)}">×</button></span>`).join('')}</div>` : ''}`;
+}
+const counselSlotTeachers = () => st.tt ? new Set(st.tt.entries.filter(e => isCounselCell(e) && shifts().includes(e.slot)).map(e => e.t)) : new Set();
+function viewTeachers() {
+  const T = st.settings.teachers, CT = counselSlotTeachers();
+  const codes = [...new Set([...Object.keys(T), ...CT])].sort((a, b) => ((CT.has(b) && !(T[b] && (T[b].counsel || []).length)) - (CT.has(a) && !(T[a] && (T[a].counsel || []).length))) || (CT.has(b) - CT.has(a)) || nat(a, b));
+  const rows = codes.map(c => { const t = T[c] || {}, need = CT.has(c) && !(t.counsel || []).length;
+    return `<tr data-t="${esc(c)}" class="${need ? 'flag' : ''}"><td><b>${esc(c)}</b>${CT.has(c) ? ' <span class="badge ok">slot this week</span>' : ''}${T[c] ? '' : ' <span class="badge err">not added</span>'}</td>
+      <td><input class="input sm" data-tf="name" value="${esc(t.name || '')}" style="width:170px" aria-label="Full name of ${esc(c)}"></td>
+      <td><input class="input sm" data-tf="subject" value="${esc(t.subject || '')}" style="width:100px" aria-label="Subject of ${esc(c)}"></td>
+      <td><input class="input sm" data-tl="taught" value="${esc((t.taught || []).join(', '))}" style="width:190px" aria-label="Batches ${esc(c)} teaches"></td>
+      <td><input class="input sm" data-tl="counsel" value="${esc((t.counsel || []).join(', '))}" style="width:220px${need ? ';border-color:var(--danger)' : ''}" placeholder="${need ? 'Needed: e.g. XA1, XA2' : ''}" aria-label="Batches ${esc(c)} counsels"></td>
+      <td style="text-align:center"><input type="checkbox" data-tsen ${t.senior ? 'checked' : ''} aria-label="${esc(c)} is senior faculty"></td>
+      <td><button class="btn ghost icon-btn danger" type="button" data-delt="${esc(c)}" aria-label="Delete ${esc(c)}">${ICON.del}</button></td></tr>`; }).join('');
+  return `<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"><input class="input sm" id="tFilter" placeholder="Find a teacher or batch" style="width:220px" aria-label="Find a teacher or batch">
+      <button class="btn sm" type="button" id="addT">${ICON.plus}Add teacher</button>
+      <label class="btn sm" style="cursor:pointer">Upload teachers<input type="file" accept=".xlsx" id="impT" class="hide"></label>
+      <button class="btn sm" type="button" id="dlT">${ICON.dl}Download teachers</button>
+      ${st.tt ? '<button class="btn sm" type="button" id="fillTaught">Fill empty “Batches taught” from this week’s timetable</button>' : ''}</div>
+    <div class="tbl scrollbox" style="max-height:560px"><table id="tTable"><thead><tr><th>Short name</th><th>Full name</th><th>Subject</th><th>Batches taught</th><th>Batches to counsel</th><th>Senior</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+const batchList = v => [...new Set(String(v || '').split(/[,;\/\n+]+/).map(x => x.toUpperCase().replace(/\s+/g, '')).filter(Boolean))];
+async function importTeachers(file) {
+  const wb = await readWorkbook(file), p = E.readTeachers(wb.SheetNames.map(n => ({ name: n, rows: rowsOf(wb.Sheets[n]) })));
+  if (!p.ok) { alert(p.fatal); return; }
+  const n = Object.keys(p.teachers).length, had = Object.values(st.settings.teachers).filter(t => (t.counsel || []).length).length;
+  if (had && !confirm(`Replace the details of the ${n} teachers in this file? Teachers not in the file stay as they are.`)) return;
+  for (const [c, t] of Object.entries(p.teachers)) st.settings.teachers[c] = { ...(st.settings.teachers[c] || {}), ...t, name: t.name || (st.settings.teachers[c] || {}).name || '', subject: t.subject || (st.settings.teachers[c] || {}).subject || '' };
+  T('upload_teachers', { ok: true, teachers: n }); changed(); toast(`${n} teachers loaded`);
+  if (p.issues.length) alert(p.issues.map(i => `Row ${i.row}: ${i.msg}`).join('\n'));
+}
+async function downloadTeachers() {
+  try {
+    const wb = new ExcelJS.Workbook(); E.fillTeachersTemplate(wb, { teachers: st.settings.teachers, taught: st.tt ? E.taughtFromTimetable(st.tt, st.settings) : {} });
+    const buf = await wb.xlsx.writeBuffer(); T('download_teachers', { ok: true });
+    await saveFile(`Counselling_Teachers_${new Date().toISOString().slice(0, 10)}.xlsx`, new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  } catch (e) { alert('The file could not be made: ' + e.message); }
+}
+function viewBatchTT() {
+  if (!st.tt || !st.students) return '<p class="muted">Upload the timetable and the student list to see this.</p>';
+  const R = E.batchTimetable(st.tt, st.settings, st.students).filter(r => r.students);
+  const flagged = R.filter(r => r.flag).length;
+  return `<p class="muted" style="margin-top:0">When each batch has class this week, next to the Shift of its students. ${flagged ? `<b>${flagged}</b> batch${flagged > 1 ? 'es' : ''} where the two disagree are marked.` : 'No disagreements.'}</p>
+    <div style="margin-bottom:10px"><input class="input sm" id="btFilter" placeholder="Find a batch" style="width:200px" aria-label="Find a batch"></div>
+    <div class="tbl scrollbox" style="max-height:520px"><table id="btTable"><thead><tr><th>Batch</th><th class="num">Students</th><th>Shift (student list)</th>${E.DAYS.map(d => `<th>${d.slice(0, 3)}</th>`).join('')}<th>Check</th></tr></thead><tbody>
+    ${R.map(r => `<tr class="${r.flag ? 'flag' : ''}"><td><b>${esc(r.batch)}</b></td><td class="num">${r.students}</td><td>${esc(r.shift)}${r.shift === 'Mixed' ? ` <span class="muted">${r.morning} M / ${r.evening} E</span>` : ''}</td>
+      ${E.DAYS.map(d => `<td>${r.days[d].length ? esc(r.days[d].join(' ')) : '<span class="muted">—</span>'}</td>`).join('')}<td style="white-space:normal;min-width:240px">${r.flag ? esc(r.flag) : '<span class="badge ok">OK</span>'}</td></tr>`).join('')}</tbody></table></div>`;
+}
+// the main file: the student list with this week's counsellings added (students not marked absent)
+async function downloadStudentList(withWeek) {
+  if (!st.students) return alert('Upload the student list first.');
+  busy(true, 'Writing the student list…'); await nextFrame();
+  try {
+    const weekRecs = withWeek && st.result ? st.result.rows.filter(r => aStu(r.s.roll).att !== 'Absent').map(r => ({ roll: r.s.roll, date: r.p.date, by: r.p.t, remarks: aStu(r.s.roll).remarks || '' })) : [];
+    const wb = new ExcelJS.Workbook(); E.fillStudentList(wb, { students: [...st.students.values()].sort((a, b) => nat(a.batch, b.batch) || nat(a.roll, b.roll)), weekRecs, teachers: st.settings.teachers });
+    const buf = await wb.xlsx.writeBuffer(); T('download_student_list', { ok: true, week: !!withWeek, added: weekRecs.length });
+    await saveFile(withWeek ? `Student_List_updated_${st.settings.weekStart}.xlsx` : 'Counselling_Student_List.xlsx', new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  } catch (e) { alert('The student list could not be made: ' + e.message); }
+  busy(false);
+}
 /* ---------- the updated faculty timetable: the uploaded file with only the moved counselling cells changed ---------- */
 async function downloadTimetable() {
   const f = await idb.get('ttFile'); if (!f || !st.tt || !st.tt.grid) return alert('Upload the faculty timetable again, then download the updated timetable. (The original file is kept only from now on.)');
@@ -584,9 +669,9 @@ function recChecks() {
 }
 async function downloadTemplate() {
   try {
-    const wb = new ExcelJS.Workbook(); E.fillTemplate(wb, { teachers: st.settings.teachers, students: [], history: [] });
+    const wb = new ExcelJS.Workbook(); E.fillStudentList(wb, { students: [], teachers: st.settings.teachers });
     const buf = await wb.xlsx.writeBuffer(); T('download_template', { ok: true });
-    await saveFile('Counselling_Student_Template.xlsx', new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+    await saveFile('Counselling_Student_List_Template.xlsx', new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
   } catch (e) { alert('The template could not be made: ' + e.message); }
 }
 function viewUpload() {
@@ -598,11 +683,12 @@ function viewUpload() {
       <p>Excel with “Teacher, M1 … E3” for each day, and two rows per teacher: the subject, then the batch or room.</p>
       <div class="status">${tt ? `<span class="badge ok">Loaded</span> <b>${esc(st.ttName)}</b><br><span class="muted">${tt.teachers.length} teachers · ${counsel} counselling cells${tt.weekStart ? ` · week of ${fmtShort(tt.weekStart)}` : ''}</span>` : '<span class="muted">Choose a file or drop it here</span>'}</div></label>
     <label class="drop ${rc ? 'loaded' : ''}" data-drop="rec"><input type="file" accept=".xlsx,.xls" id="recFile">
-      <span class="fileic">${ICON.file}</span><h3>Students and counselling history</h3>
-      <p>Only the student template is accepted: a “Students” sheet (Roll No, Student Name, Batch, Class, Status) and a “Counselling History” sheet (Roll No, Date, Counsellor Code, Result).</p>
+      <span class="fileic">${ICON.file}</span><h3>Student list</h3>
+      <p>One row per student: Roll No, Student Name, Batch, Shift (Morning or Evening, when the student has classes) and Status, then the counselling history: Last counselled date, Last counsellor, Remarks, 2nd last, and so on. Upload it once; it stays on this computer.</p>
       <div class="status">${rc ? `<span class="badge ok">Loaded</span> <b>${esc(st.recName)}</b><br><span class="muted">${st.students ? st.students.size.toLocaleString() : 0} students from ${rc.map(u => esc(u.sheet)).join(', ')}</span>` : '<span class="muted">Choose a file or drop it here</span>'}</div></label>
   </div>
-  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center"><button class="btn sm" type="button" id="dlTpl">${ICON.dl}Download student template</button><span class="muted" style="font-size:13.5px">Empty template with dropdowns, the teacher codes and instructions.</span></div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center"><button class="btn sm" type="button" id="dlTpl">${ICON.dl}Download student list template</button><span class="muted" style="font-size:13.5px">Empty list with the columns, dropdowns and instructions.</span></div>
+  ${st.oldRec ? '<div class="notice w" style="margin-top:12px">The student file uploaded before has no Shift column, so it cannot be used any more. Upload the student list in the new format.</div>' : ''}
   ${recChecks()}
   ${tt && tt.warnings.length ? `<div class="notice w" style="margin-top:16px"><b>Timetable notes</b><ul>${tt.warnings.map(w => `<li>${esc(w)}</li>`).join('')}</ul></div>` : ''}
   <div class="optline" style="margin-top:16px;display:block"><b>Counselling records database (kept on this computer)</b> <span class="muted">${dbRecs().length.toLocaleString()} students counselled across ${new Set(dbRecs().map(x => x.week)).size} saved week${new Set(dbRecs().map(x => x.week)).size === 1 ? '' : 's'}. They count as history together with the student file, so the same students are not booked again until everyone has had a turn. Save a week from Weekly schedule → Dashboard.</span>
@@ -651,14 +737,8 @@ function viewRules() {
         <button class="btn ghost icon-btn" type="button" data-rmove="${i}" data-d="1" aria-label="Move rule down" ${i < s.rules.length - 1 ? '' : 'disabled'}>${ICON.down}</button>
         <button class="btn ghost icon-btn danger" type="button" data-rdel="${i}" aria-label="Delete rule">${ICON.del}</button></div></div>`).join('')}</div>
     <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button class="btn" type="button" id="addRule">${ICON.plus}Add rule</button><button class="btn ghost" type="button" id="resetRules">Restore default rules</button></div>`;
-  const cons = `<div class="optline">${toggle('optOpp', s.oppositeShiftOnly !== false, 'Counsel students only in the opposite shift')}<div><b>Only in the opposite shift</b><span class="muted">Morning batches are counselled in evening periods and evening batches in morning periods. Turn off to also use free periods inside a batch’s own shift.</span></div></div>
-    <div class="optline">${toggle('optRepeat', s.noRepeatTeacher, 'Prefer a different teacher')}<div><b>Prefer a different teacher</b><span class="muted">Students who have not met this teacher go first. Someone who has met them is booked only when that would otherwise leave a seat empty.</span></div></div>
-    <div class="optline">${toggle('optMove', s.moveOverflow, 'Move slots when cabins are full')}<div><b>Move slots when cabins are full</b><span class="muted">Same day first, then the nearest day, only where the teacher has no class.</span></div></div>
-    <div class="optline">${toggle('optSenior', s.protectSenior !== false, 'Never move senior faculty')}<div><b>Never move senior faculty</b><span class="muted">When cabins are full, only other teachers are moved. Senior faculty are teachers of these classes:</span><input class="input sm" id="senior" value="${esc(s.seniorClasses || '')}" style="width:160px;margin-top:6px" aria-label="Senior faculty classes"></div></div>
-    <div class="optline">${toggle('optStrict', s.strictClass !== false, 'Students only with a teacher of their class')}<div><b>Students only with a teacher of their class</b><span class="muted">Uses “Teacher classes that share students” below. By default 11th students meet 11th and FTP teachers, 12th students meet 12th teachers and Target students meet Target teachers. Applies to every rule.</span></div></div>
-    <div class="optline">${toggle('optRound', s.onceRound !== false, 'Students due this round go first')}<div><b>Students due this round go first</b><span class="muted">Rounds are counted inside each class group, so 11th, 12th and Target move at their own pace. Students counselled fewer times always go first. A student already counselled this round fills a seat only when no due student is free, so no seat is left empty. Counts the student file and the saved weekly records.</span></div></div>
-    <div class="optline"><input class="input sm" type="number" min="0" max="365" id="gap" value="${s.minGapDays || 0}" style="width:76px" aria-label="Minimum days between counselling"><div><b>Days before a student can be counselled again</b><span class="muted">0 means no limit. Students counselled more recently are skipped.</span></div></div>
-    <div class="optline" style="display:block"><label class="f" for="cg">Teacher classes that share students</label><input class="input" id="cg" value="${esc(s.classGroups)}" style="width:min(380px,100%)"><div class="muted" style="font-size:13.5px;margin-top:4px">Separate groups with |. Used by “students of the same class group” and “Students only with a teacher of their class”. FTP is for new teachers, who counsel 11th students.</div></div>
+  const cons = `<div class="optline">${toggle('optMove', s.moveOverflow, 'Move slots when cabins are full')}<div><b>Move slots when cabins are full</b><span class="muted">A slot moves only to a period where the teacher has no class and a cabin is free. Same day first, then the nearest day.</span></div></div>
+    <div class="optline">${toggle('optSenior', s.protectSenior !== false, 'Never move senior faculty')}<div><b>Never move senior faculty</b><span class="muted">Teachers ticked Senior in the Teachers section keep their timetable slot.</span></div></div>
     <div class="optline" style="display:block"><label class="f" for="kw">Word that marks a counselling cell in the timetable</label><input class="input" id="kw" value="${esc(s.keyword)}" style="width:220px"></div>`;
   const red = `<label class="f">Buildings that reduce the count</label>
     <div class="chips" style="margin-bottom:18px">${s.reduceBuildings.map((b, i) => `<span class="chip" style="background:var(--surface2);border-color:var(--line)">${esc(b)}<button type="button" data-delred="${i}" aria-label="Remove ${esc(b)}">×</button></span>`).join('')}
@@ -683,24 +763,25 @@ function viewRules() {
     <datalist id="bldList">${s.knownBuildings.concat(['M3 old']).map(b => `<option value="${esc(b)}">`).join('')}</datalist>`;
   const backup = `<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" type="button" id="expSet">Export settings</button>
     <label class="btn" style="cursor:pointer">Import settings<input type="file" accept=".json" id="impSet" class="hide"></label><button class="btn danger" type="button" id="resetSet">Reset everything to defaults</button></div>`;
-  return `<div class="card">${section(`Teacher batches <span class="badge">${new Set((s.teacherBatches || []).map(x => x.t)).size}</span>`, ['Optional. Decide which batches each teacher counsels. A teacher can have several batches, and a batch several teachers.', 'Upload the teacher batches Excel or edit the list here. Teachers not listed use the matching rules below.'], viewTB(), 'sec-tb')}
-    ${section('Matching rules', ['Rules decide which batches a teacher may get. A batch allowed by any rule can be booked; a higher rule only breaks ties.', 'Always true: the student has no class then (by default, only in the shift opposite to their classes), is on the same campus and the same class group, and is booked once a week.', 'Then, in this order: students due this round, students who have not met the teacher, the higher rule, the student counselled longest ago. Slots with the fewest free students choose first, so every teacher gets students when any are free.'], rules, 'rules')}
-    ${section('Matching limits', 'These apply to every rule.', cons, 'sec-limits')}
+  return `<div class="card">${section('Planner options', 'Moves and the counselling word.', cons, 'sec-limits')}
     ${section('Student count by building', ['Each slot starts with the students-per-slot number.', 'It loses 1 for each neighbouring class held in one of these buildings, because the teacher needs time to walk over.'], red, 'sec-building')}
-    ${section(`Teachers <span class="badge">${tRows.length}</span>`, ['Class decides which students a teacher can get under “same class group” and “teacher of class” rules.', 'FTP = new teachers (Faculty Training Program), who counsel 11th students. A teacher with no class here and no classes in the timetable is treated as FTP.'], teach, 'sec-teachers')}
-    ${section(`Batch buildings <span class="badge">${bRows.length}</span>`, ['Used by the building rule, the PC campus rule and the announcement sheet. Doubt classes take the building from the first word, such as “M3 P Dbt 2”.', 'Import room list reads Batch, Building and Room No. columns, and the Building, Floor, Room, Morning, Evening layout.'], bld, 'sec-batches')}
-    ${section('Backup', 'Copy all settings to another computer, or start over.', backup, 'sec-backup')}</div>`;
+    ${section(`Batch buildings <span class="badge">${bRows.length}</span>`, ['Used by the building rule, the PC campus rule and the announcement sheet.', 'Import room list reads Batch, Building and Room No. columns, and the Building, Floor, Room, Morning, Evening layout.'], bld, 'sec-batches')}
+    ${section('Backup', 'Copy all settings, including the Teachers section, to another computer, or start over.', backup, 'sec-backup')}</div>`;
 }
 
 function viewSetup() {
   const s = st.settings, ok = ready();
   const todo = [!st.tt && 'upload the faculty timetable', !st.students && 'upload the student data', !s.cabins.filter(Boolean).length && 'add at least one cabin', !s.weekStart && 'set the Monday of the week', !shifts().length && 'switch on at least one period'].filter(Boolean);
-  const nav = [['sec-files', 'Files'], ['sec-week', 'Week and cabins'], ['sec-tb', 'Teacher batches'], ['rules', 'Matching rules'], ['sec-limits', 'Matching limits'], ['sec-building', 'Building rule'], ['sec-teachers', 'Teachers'], ['sec-batches', 'Batch buildings'], ['sec-backup', 'Backup']];
-  return head('Set up the week', 'Upload this week’s files, check cabins and periods, and adjust rules when something changes. Everything is saved in this browser; nothing is sent to a server.')
+  const nav = [['sec-files', 'Files'], ['sec-checks', 'Checks'], ['sec-teachers', 'Teachers'], ['sec-btt', 'Batch timetable'], ['sec-adv', 'Advanced settings']];
+  const nl = locks().length; if (nl && st.tt && st.students) todo.push(`fix ${nl} problem${nl > 1 ? 's' : ''} under Checks`);
+  const nT = Object.values(s.teachers).filter(t => (t.counsel || []).length).length;
+  return head('Set up', 'Upload the timetable each week. The student list and the teachers are set once and kept on this computer. The schedule opens when every check passes.')
   + `<div class="setup"><nav class="toc" aria-label="On this page"><ul>${nav.map(([id, l]) => `<li><a href="#${id}">${l}</a></li>`).join('')}</ul></nav><div class="setup-body">
-    <div class="group" id="sec-files"><h2 class="gh">Files</h2><p class="gd">Upload a new timetable each week. The student file only needs updating when it changes.</p>${viewUpload()}</div>
-    <div class="group" id="sec-week"><h2 class="gh">Week and cabins</h2><p class="gd">Check these before each calculation.</p>${viewWeek()}</div>
-    <div class="group" id="sec-rules"><h2 class="gh">Rules and lists</h2><p class="gd">Change these when rules, buildings or teachers change.</p>${viewRules()}</div>
+    <div class="group" id="sec-files"><h2 class="gh">Files</h2><p class="gd">A new faculty timetable each week. The student list only when it changes.</p>${viewUpload()}</div>
+    <div class="group" id="sec-checks"><h2 class="gh">Checks</h2><p class="gd">Everything the planner needs is checked first. Problems in red keep the schedule locked; each one says where it is and how to fix it.</p>${viewChecks()}</div>
+    <div class="group" id="sec-teachers"><h2 class="gh">Teachers <span class="badge">${nT} with batches to counsel</span></h2><p class="gd">Set once, then edit here: add, change or delete a teacher. “Batches to counsel” decides whose students each teacher gets. Senior teachers’ slots are never moved.</p>${viewTeachers()}</div>
+    <div class="group" id="sec-btt"><h2 class="gh">Batch timetable</h2><p class="gd">Which batch has class at what time. Morning students are counselled only in evening periods, evening students only in morning periods, and never while their batch has class.</p>${viewBatchTT()}</div>
+    <details class="group" id="sec-adv"><summary class="gh" style="cursor:pointer">Advanced settings</summary><p class="gd">Cabins, periods, seats per slot, buildings and backup. Set once.</p>${viewWeek()}<div style="height:18px"></div>${viewRules()}</details>
     <div class="calcbar card"><div><b>${ok ? 'Ready to calculate' : 'Almost ready'}</b><span class="muted">${ok ? 'The schedule opens on the Weekly schedule page.' : 'Still to do: ' + todo.join(', ') + '.'}</span></div>
       <button class="btn primary" type="button" id="calc3" ${ok ? '' : 'disabled'}>Calculate schedule</button></div>
   </div></div>`;
@@ -714,9 +795,9 @@ function viewSchedule() {
   const notes = [...(r.invalid || []).map(x => ['e', x]), ...st.planWarnings.map(x => ['w', x]), ...r.warnings.map(x => ['w', x])];
   const views = [['board', 'Cabin board'], ['sessions', 'Teacher sessions'], ['students', 'Students'], ['reception', 'Reception'], ['announce', 'Announcements'], ['dash', 'Dashboard'], ['workload', 'Workload'], ['why', `Why · log${r.rows.length < cap ? ' ⚠' : ''}`], ['notes', `Moves and notes · ${st.moves.length + notes.length}`]];
   return head('Weekly schedule', 'Select a slot on the board to move it, change its students or remove it. The student list updates straight away.',
-    `<button class="btn" type="button" id="addSlot">${ICON.plus}Add slot</button><button class="btn" type="button" id="dlTT">${ICON.dl}Updated timetable</button><button class="btn" type="button" id="dlRep">${ICON.dl}Download report</button><button class="btn primary" type="button" id="dl">${ICON.dl}Download Excel</button>`)
+    `<button class="btn" type="button" id="addSlot">${ICON.plus}Add slot</button><button class="btn" type="button" id="dlTT">${ICON.dl}Updated timetable</button><button class="btn" type="button" id="dlSL">${ICON.dl}Updated student list</button><button class="btn" type="button" id="dlRep">${ICON.dl}Download report</button><button class="btn primary" type="button" id="dl">${ICON.dl}Download Excel</button>`)
   + `<div class="kpis"><div class="kpi"><b>${st.plan.length}</b><span>Counselling slots</span></div><div class="kpi"><b>${r.rows.length}</b><span>Students booked of ${cap} seats</span></div>
-     <div class="kpi"><b>${st.moves.length}</b><span>Slots moved to a free cabin</span></div><div class="kpi"><b>${r.passes && r.passes[0] ? r.passes[0].booked : r.rows.length}</b><span>Booked from students due this round</span></div></div>
+     <div class="kpi"><b>${st.moves.length}</b><span>Slots moved to a free cabin</span></div><div class="kpi"><b>${r.rows.filter(x => /^Due this round/.test(x.basis)).length}</b><span>Booked from students due this round</span></div></div>
   ${r.rows.length < cap && st.view !== 'why' ? `<div class="notice i">${cap - r.rows.length} seats are empty. <button class="btn sm" type="button" data-view="why">See why</button></div>` : ''}
   ${notes.some(n => n[0] === 'e') ? `<div class="notice e"><b>Fix before sending</b><ul>${notes.filter(n => n[0] === 'e').map(n => `<li>${esc(n[1])}</li>`).join('')}</ul></div>` : ''}
   <div class="tabs" role="tablist">${views.map(([k, l]) => `<button type="button" role="tab" aria-selected="${st.view === k}" class="${st.view === k ? 'on' : ''}" data-view="${k}">${l}</button>`).join('')}</div>
@@ -806,11 +887,11 @@ function vDash() {
     <div class="kpi"><b>${first}</b><span>Booked students never counselled before</span></div></div>
   <div class="tbl" style="margin-bottom:24px"><table><thead><tr><th>Day</th><th class="num">Slots</th><th class="num">Teachers came</th><th class="num">Late</th><th class="num">Teacher absent</th><th class="num">Students booked</th><th class="num">Present</th><th class="num">Absent</th><th class="num">Not marked</th><th class="num">Parents came</th></tr></thead><tbody>
     ${E.DAYS.filter(d => w.day[d].slots).map(d => dayRow(`<b>${d}</b> <span class="muted">${fmtShort(dayDate(d))}</span>`, w.day[d])).join('')}${dayRow('<b>Week</b>', t, true)}</tbody></table></div>
-  <h2 class="gh">All students so far</h2>
-  <p class="muted">Students in this week’s batches, from the student file and the saved weekly records, before this week. ${st.settings.onceRound !== false ? `Rounds by class group: ${Object.entries(cov.byGroup || {}).map(([g, n]) => `${esc(g)} round ${n}`).join(', ')}. ${cov.roundDone.toLocaleString()} of ${cov.reachable.toLocaleString()} students have had their turn this round; the rest go first.` : 'Students due this round are not put first.'}</p>
-  <div class="tbl" style="margin-bottom:24px"><table><thead><tr><th>Class</th><th class="num">Students</th><th class="num">Counselled at least once</th><th class="num">Never counselled</th><th>Coverage</th></tr></thead><tbody>
-    ${Object.entries(cov.byClass).sort((a, b) => nat(a[0], b[0])).map(([c, x]) => `<tr><td><b>${esc(c)}</b></td><td class="num">${x.active}</td><td class="num">${x.done}</td><td class="num">${x.active - x.done}</td><td>${bar(x.done, x.active)} <span class="muted">${pct(x.done, x.active)}</span></td></tr>`).join('')}
-    <tr><td><b>All</b></td><td class="num"><b>${cov.active}</b></td><td class="num"><b>${cov.done}</b></td><td class="num"><b>${cov.active - cov.done}</b></td><td>${bar(cov.done, cov.active)} <span class="muted">${pct(cov.done, cov.active)}</span></td></tr></tbody></table></div>
+  <h2 class="gh">Batches this round</h2>
+  <p class="muted">Each batch goes in roll-number order. Round = times its students have been counselled, plus one. Still due = due students not booked this week. Weeks to finish = at this week’s pace.</p>
+  <div class="tbl scrollbox" style="margin-bottom:24px"><table><thead><tr><th>Batch</th><th class="num">Students</th><th class="num">Round</th><th class="num">Due before this week</th><th class="num">Booked this week</th><th class="num">Still due</th><th class="num">Weeks to finish</th><th>Counselled by</th></tr></thead><tbody>
+    ${(cov.batches || []).map(b => `<tr class="${b.counsellors.length ? '' : 'flag'}"><td><b>${esc(b.batch)}</b></td><td class="num">${b.students}</td><td class="num">${b.round}</td><td class="num">${b.dueBefore}</td><td class="num">${b.booked}</td><td class="num">${b.dueAfter}</td><td class="num">${b.weeks === null ? '—' : b.weeks}</td><td style="white-space:normal">${b.counsellors.length ? esc(b.counsellors.join(', ')) : '<span class="badge err">no teacher</span>'}</td></tr>`).join('')}
+  </tbody></table></div>
   <h2 class="gh">Saved weekly records</h2>
   <p class="muted">When the week is over, save it to the records. Students marked present, or not marked, count as counselled, so next week books the students still waiting. Absent students stay in the queue. Records are kept on this computer, in this browser; export them regularly to keep a copy.</p>
   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"><button class="btn primary" type="button" id="saveWeek">Save this week to records</button><button class="btn" type="button" id="expRec" ${saved.length ? '' : 'disabled'}>Export records (Excel)</button></div>
@@ -879,7 +960,7 @@ function vNotes(notes) {
 
 // the "why" log: each step from the files to the bookings, with the reason seats stayed empty
 function whyLog() {
-  return E.buildLog({ tt: st.tt, settings: st.settings, recMeta: st.recMeta, recIssues: st.recIssues, students: st.students, plan: st.plan || [], planWarnings: st.planWarnings || [], moves: st.moves || [], result: st.result });
+  return E.buildLog({ tt: st.tt, settings: st.settings, recMeta: st.recMeta, recIssues: st.recIssues, students: st.students, plan: st.plan || [], planWarnings: st.planWarnings || [], moves: st.moves || [], result: st.result, checks: inputChecks() });
 }
 function vWhy() {
   const L = whyLog(), all = !!st.logAll, BADGE = { ok: ['ok', 'OK'], warn: ['warn', 'Check'], fail: ['err', 'Problem'] };
@@ -947,7 +1028,7 @@ function bind() {
     z.addEventListener('dragover', e => { e.preventDefault(); z.classList.add('over'); }); z.addEventListener('dragleave', () => z.classList.remove('over'));
     z.addEventListener('drop', e => { e.preventDefault(); z.classList.remove('over'); const f = e.dataTransfer.files[0]; if (f) (z.dataset.drop === 'tt' ? onTimetable : onStudents)(f); });
   });
-  on('clearData', 'click', async () => { if (!confirm('Remove the uploaded timetable and student data from this browser?')) return; await idb.del('tt'); await idb.del('ttFile'); await idb.del('rec'); Object.assign(st, { tt: null, records: null, recMeta: null, recIssues: null, students: null }); resetSchedule(); render(); });
+  on('clearData', 'click', async () => { if (!confirm('Remove the uploaded timetable and student data from this browser?')) return; await idb.del('tt'); await idb.del('ttFile'); await idb.del('rec'); await idb.del('rec2'); Object.assign(st, { tt: null, records: null, v2: null, recMeta: null, recIssues: null, students: null }); resetSchedule(); render(); });
   // week & cabins
   on('addCab', 'click', () => { const v = $('newCab').value.trim(); if (!v) return; if (st.settings.cabins.includes(v)) return toast('That cabin is already listed'); st.settings.cabins.push(v); (st.settings.cabinBuildings = st.settings.cabinBuildings || {})[v] = $('newCabB').value; changed(); if (st.plan) toast('Recalculate to use the new cabin'); });
   all('[data-cabb]', el => el.onchange = () => { (st.settings.cabinBuildings = st.settings.cabinBuildings || {})[el.dataset.cabb] = el.value; changed(false); if (st.plan) toast('Recalculate to apply the cabin buildings'); });
@@ -981,15 +1062,23 @@ function bind() {
   on('newRed', 'keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('addRed').click(); } });
   all('[data-delred]', b => b.onclick = () => { st.settings.reduceBuildings.splice(+b.dataset.delred, 1); changed(); });
   all('[data-chk]', sel => sel.onchange = () => { st.settings.checks[sel.dataset.chk][sel.dataset.k] = sel.value; changed(false); });
-  all('#tTable [data-tf]', i => i.onchange = () => { st.settings.teachers[i.closest('tr').dataset.t][i.dataset.tf] = i.value.trim(); changed(false); });
-  all('[data-delt]', b => b.onclick = () => { delete st.settings.teachers[b.dataset.delt]; changed(); });
-  on('addT', 'click', () => { const c = (prompt('Teacher short code, as in the timetable') || '').trim(); if (!c) return; st.settings.teachers[c] = st.settings.teachers[c] || { name: '', subject: '', cls: '' }; changed(); });
+  const tOf = el => { const c = el.closest('tr').dataset.t; return st.settings.teachers[c] || (st.settings.teachers[c] = { name: '', subject: '', taught: [], counsel: [], senior: false }); };
+  all('#tTable [data-tf]', i => i.onchange = () => { tOf(i)[i.dataset.tf] = i.value.trim(); changed(false); });
+  all('#tTable [data-tl]', i => i.onchange = () => { tOf(i)[i.dataset.tl] = batchList(i.value); changed(); });
+  all('#tTable [data-tsen]', i => i.onchange = () => { tOf(i).senior = i.checked; changed(false); if (st.plan) toast('Recalculate to apply'); });
+  all('[data-delt]', b => b.onclick = () => { const c = b.dataset.delt; if (!confirm(`Delete ${c} (${tName(c)}) from the Teachers section?`)) return; delete st.settings.teachers[c]; changed(); });
+  on('addT', 'click', () => { const c = (prompt('Teacher short name, as in the timetable') || '').trim().toUpperCase().replace(/\s+/g, ''); if (!c) return; if (st.settings.teachers[c]) return toast(`${c} is already in the list`); st.settings.teachers[c] = { name: '', subject: '', taught: [], counsel: [], senior: false }; changed(); });
+  on('dlT', 'click', downloadTeachers);
+  on('fillTaught', 'click', () => { const m = E.taughtFromTimetable(st.tt, st.settings); let n = 0; for (const [c, b] of Object.entries(m)) { const t = st.settings.teachers[c] || (st.settings.teachers[c] = { name: '', subject: '', counsel: [], senior: false }); if (!(t.taught || []).length) { t.taught = b; n++; } } changed(); toast(`Batches taught filled for ${n} teacher${n === 1 ? '' : 's'}`); });
+  all('[data-skip]', el => el.onchange = () => { const x = new Set(st.settings.skipBatches || []); if (el.checked) x.add(el.dataset.skip); else x.delete(el.dataset.skip); st.settings.skipBatches = [...x]; changed(); });
+  all('[data-unskip]', b => b.onclick = () => { st.settings.skipBatches = (st.settings.skipBatches || []).filter(x => x !== b.dataset.unskip); changed(); });
+  on('dlSL', 'click', () => downloadStudentList(true));
   all('#bTable [data-bf]', i => i.onchange = () => { st.settings.batchBuildings[i.closest('tr').dataset.b] = i.value.trim(); changed(false); });
   all('#bTable [data-brf]', i => i.onchange = () => { const b = i.closest('tr').dataset.b, rm = st.settings.batchRooms || (st.settings.batchRooms = {}); rm[b] = { ...(rm[b] || {}), [i.dataset.brf]: i.value.trim() }; changed(false); });
   all('[data-delb]', b => b.onclick = () => { delete st.settings.batchBuildings[b.dataset.delb]; changed(); });
   on('addB', 'click', () => { const b = (prompt('Batch code, as in the timetable') || '').trim(); if (!b) return; const g = (prompt(`Building for ${b}`) || '').trim(); if (!g) return; st.settings.batchBuildings[b] = g; changed(); });
   const filt = (inp, tbl) => on(inp, 'input', e => { const q = e.target.value.toLowerCase(); document.querySelectorAll(`#${tbl} tbody tr`).forEach(tr => tr.classList.toggle('hide', !tr.textContent.toLowerCase().includes(q) && ![...tr.querySelectorAll('input')].some(i => i.value.toLowerCase().includes(q)))); });
-  filt('tFilter', 'tTable'); filt('bFilter', 'bTable');
+  filt('tFilter', 'tTable'); filt('bFilter', 'bTable'); filt('btFilter', 'btTable');
   on('impT', 'change', e => e.target.files[0] && importTeachers(e.target.files[0]).catch(x => alert(x.message)));
   on('impB', 'change', e => e.target.files[0] && importRoomList(e.target.files[0]).catch(x => alert(x.message)));
   on('expSet', 'click', () => saveFile('counselling-planner-settings.json', JSON.stringify(st.settings, null, 2)));
@@ -1160,7 +1249,7 @@ async function downloadExcel() {
       [6, 11, 11, 7, 7, 9, 20, 10, 9, 8, 8, 10, 11, 36, 13, 14, 30],
       st.plan.map((p, i) => [i + 1, fmtDate(p.date), p.day, p.shift, p.cabin, p.t, tName(p.t), tSub(p.t), tCls(p.t), E.hm(p.start), E.hm(p.end), cnt[p.id] || 0, w[p.t] ? w[p.t].total : '', p.rule, p.venue, p.moved ? `${p.origDay.slice(0, 3)} ${p.origShift}` : '—', Object.entries(bat[p.id] || {}).map(([b, n]) => `${b} (${n})`).join(', ')]),
       { left: [6, 13, 16], bold: [11, 12], style: (row, i) => { const p = st.plan[i]; row.getCell(5).fill = cabFill(p.cabin); if (p.moved) row.getCell(16).fill = solid(MOVED); } });
-    sheet('Student Assignments', 'STUDENT-WISE COUNSELLING ASSIGNMENTS', 'Key columns first. No student is given a teacher who has counselled them before.',
+    sheet('Student Assignments', 'STUDENT-WISE COUNSELLING ASSIGNMENTS', 'Key columns first. Students go in roll-number order within each batch; students due this round come first.',
       ['Sr.', 'Student Name', 'Teacher Name', 'Cabin', 'Date', 'Time', 'Last Counselled', 'Times Counselled Before', 'Previously Counselled By', 'Roll No.', 'Batch', 'Day', 'Period', 'Teacher Code', 'Subject', 'Course', 'Batch Class Shift', 'Matched By'],
       [6, 26, 20, 7, 11, 8, 13, 11, 28, 11, 8, 11, 7, 9, 10, 13, 10, 24],
       r.rows.map((x, i) => [i + 1, x.s.name, tName(x.p.t), x.p.cabin, fmtDate(x.p.date), x.time, x.s.last ? fmtDate(x.s.last) : 'Never', x.s.times, x.s.history.map(h => `${h.by} (${h.date.slice(8, 10)}-${h.date.slice(5, 7)})`).join(', ') || '—', x.s.roll, x.s.batch, x.p.day, x.p.shift, x.p.t, tSub(x.p.t), x.s.course, x.batchShift, x.basis]),
@@ -1170,8 +1259,8 @@ async function downloadExcel() {
       ['Code', 'Teacher Name', 'Subject', 'Class'].concat(E.DAYS.map(d => d.slice(0, 3)), ['Regular Classes', 'Doubt Classes', 'Counselling Slots', 'Total Slots (Week)', 'Students Assigned']),
       [8, 20, 10, 9, 6, 6, 6, 6, 6, 6, 10, 10, 11, 12, 11],
       tlist.map(t => [t, tName(t), tSub(t), tCls(t)].concat(E.DAYS.map(d => w[t].perDay[d] + st.plan.filter(p => p.t === t && p.day === d).length), [w[t].regular, w[t].doubt, w[t].counselling, w[t].total, sc[t] || 0])), { left: [1], bold: [13] });
-    sheet('Rules Used', 'MATCHING RULES USED FOR THIS SCHEDULE', 'Rules run from top to bottom.', ['Order', 'Rule', 'On', 'Teachers', 'Students'], [7, 28, 6, 36, 44],
-      s.rules.map((x, i) => [i + 1, x.name, x.on ? 'Yes' : 'No', (T_TYPES.find(t => t[0] === x.tType) || ['', ''])[1] + (x.tValue ? ': ' + x.tValue : ''), (S_TYPES.find(t => t[0] === x.sType) || ['', ''])[1] + (x.sValue ? ': ' + x.sValue : '')]), { left: [1, 3, 4] });
+    sheet('Batches', 'BATCHES THIS ROUND', 'Each batch goes in roll-number order. Still due = due students not booked this week.', ['Batch', 'Students', 'Round', 'Due Before This Week', 'Booked This Week', 'Still Due', 'Weeks To Finish', 'Counselled By'], [10, 10, 8, 12, 12, 10, 10, 40],
+      (r.coverage.batches || []).map(b => [b.batch, b.students, b.round, b.dueBefore, b.booked, b.dueAfter, b.weeks === null ? '—' : b.weeks, b.counsellors.join(', ')]), { left: [7] });
     sheet('Moves and Notes', 'SLOT MOVES AND NOTES', 'Moves were made because a period had more teachers than cabins.', ['Type', 'Detail'], [16, 110],
       st.moves.map(m => ['Moved', `${m.t} (${tName(m.t)}): ${m.from} → ${m.to}`]).concat(st.planWarnings.map(x => ['Note', x]), r.warnings.map(x => ['Note', x]), (r.invalid || []).map(x => ['Check', x])), { left: [1] });
     sheetAnnounce(X); sheetInOut(X); sheetAttendance(X);
@@ -1200,7 +1289,8 @@ $('themeBtn').onclick = () => { const cur = document.documentElement.getAttribut
   if (!window.XLSX || !window.ExcelJS) $('main').insertAdjacentHTML('afterbegin', '<div class="notice e">The Excel libraries did not load. Check the internet connection and reload the page.</div>');
   const db = await idb.get('db'); if (db && db.weeks) st.db = db;
   const t = await idb.get('tt'); if (t) { st.tt = t.tt; st.ttName = t.name; }
-  const r = await idb.get('rec'); if (r) { st.records = r.recs; st.recMeta = r.meta; st.recName = r.name; st.recIssues = r.issues || null; rebuildStudents(); }
+  const r = await idb.get('rec2'); if (r) { st.v2 = r.v2; st.recMeta = r.meta; st.recName = r.name; st.recIssues = r.issues || null; rebuildStudents(); }
+  else if (await idb.get('rec')) st.oldRec = true;
   restoreEdits(); if (st.plan) st.step = 1;
   await loadAtt(); render(); window.__plannerReady = true;
 })();

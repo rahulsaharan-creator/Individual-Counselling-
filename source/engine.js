@@ -446,12 +446,291 @@
     return { ok: true, edits, changes, problems, sheet: tt.grid.sheet, r0: tt.grid.r0 || 0, c0: tt.grid.c0 || 0 };
   }
 
+  /* ================= Logic v2 inputs (6 Nov 2026) ================= */
+  const nat = (a, b) => String(a).localeCompare(String(b), undefined, { numeric: true });
+  // one timetable cell can name several batches: "XA1+XA2", "XA1/XA2", "XA1, XA2", "XA1 & XA2"; doubt-class rooms stay whole
+  function roomBatches(room) {
+    const r = S(room); if (!r) return [];
+    if (/dbt|doubt|counsel/i.test(r) || !/[+\/&,]|\sand\s/i.test(r)) return [r];
+    const parts = r.split(/\s*[+\/&,]\s*|\s+and\s+/i).map(normBatch).filter(Boolean);
+    return parts.length ? parts : [r];
+  }
+  const normShift = v => { const x = S(v).toLowerCase().replace(/[^a-z]/g, ''); return ['m', 'morning', 'morn', 'mor', 'am'].includes(x) ? 'Morning' : ['e', 'evening', 'eve', 'pm'].includes(x) ? 'Evening' : ''; };
+  // letter O and zero, I and one, spaces and dashes: near-matches are shown as suggestions, never fixed silently
+  const looseCode = b => normBatch(b).replace(/[-_.]/g, '').replace(/O/g, '0').replace(/[IL]/g, '1');
+  const nearMatch = (b, list) => { const k = looseCode(b); return list.find(x => x !== b && looseCode(x) === k) || ''; };
+
+  // teacher short name or full name -> short name
+  function teacherMatcher(teachers) {
+    const byCode = new Map(), byName = new Map();
+    for (const [c, t] of Object.entries(teachers || {})) {
+      byCode.set(c.toUpperCase().replace(/\s+/g, ''), c);
+      const n = S(t && t.name).toLowerCase().replace(/\s+/g, ' ');
+      if (n) byName.set(n, byName.has(n) ? null : c);
+    }
+    return v => { const x = S(v); if (!x) return ''; const u = x.toUpperCase().replace(/\s+/g, ''); if (byCode.has(u)) return byCode.get(u); return byName.get(x.toLowerCase().replace(/\s+/g, ' ')) || ''; };
+  }
+
+  /* Student list: one row per student with the counselling history in the same row.
+     Roll No, Student Name, Batch, Shift (Morning / Evening = when the student has classes), Status,
+     then repeating groups: Last counselled date, Last counsellor, Remarks, 2nd last counselled date, 2nd last counsellor, Remarks, ...
+     A separate "Counselling History" sheet (Roll No, Date, Counsellor, Result, Remarks) is also read, for the first upload.
+     issues: level 'lock' (blocks the schedule until fixed) | 'error' (row not used) | 'warn' | 'info'; each with a fix. */
+  const SL = {
+    sheet: 'Students', base: ['Roll No', 'Student Name', 'Batch', 'Shift', 'Status'],
+    group: n => n === 1 ? ['Last counselled date', 'Last counsellor', 'Remarks'] : [`${ord(n)} last counselled date`, `${ord(n)} last counsellor`, `Remarks ${n}`]
+  };
+  const ord = n => n + (n % 10 === 1 && n % 100 !== 11 ? 'st' : n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : 'th');
+  function readStudentList(sheets, opts) {
+    opts = opts || {};
+    const weekStart = opts.weekStart || '', weekEnd = weekStart ? addDays(weekStart, 6) : '';
+    const issues = [], add = (level, sheet, row, msg, fix) => issues.push({ level, sheet, row, msg, fix: fix || '' });
+    const headRow = sh => { for (let r = 0; r < Math.min(sh.rows.length, 5); r++) { const h = (sh.rows[r] || []).map(normH); if (h.some(x => x.startsWith('roll')) && h.some(x => x.startsWith('batch'))) return r; } return -1; };
+    const sSh = sheets.find(s => /^students?( list)?$/i.test(S(s.name)) && headRow(s) >= 0) || sheets.find(s => !/history/i.test(S(s.name)) && headRow(s) >= 0);
+    if (!sSh) return { ok: false, fatal: 'No student list was found. The file needs a sheet named "Students" with Roll No, Student Name, Batch and Shift in the first row. Download the student list template from Set up.' };
+    const hr = headRow(sSh), H = (sSh.rows[hr] || []).map(S), h = H.map(normH), col = f => h.findIndex(f);
+    const ix = { roll: col(x => x.startsWith('roll')), name: col(x => ['studentname', 'name', 'student', 'nameofstudent'].includes(x)), batch: col(x => ['batch', 'batchname', 'batchcode'].includes(x)),
+      shift: col(x => x.startsWith('shift') || x === 'classshift' || x === 'classtime'), status: col(x => x === 'status') };
+    const missing = [['Roll No', ix.roll], ['Student Name', ix.name], ['Batch', ix.batch], ['Shift', ix.shift]].filter(x => x[1] < 0).map(x => x[0]);
+    if (missing.length) return { ok: false, fatal: `The "${sSh.name}" sheet has no ${missing.map(m => `"${m}"`).join(', ')} column. Add ${missing.length > 1 ? 'them' : 'it'} in row ${hr + 1}.${missing.includes('Shift') ? ' Shift says when the student has classes: Morning or Evening. Counselling is booked in the other shift.' : ''}` };
+    const base = new Set(Object.values(ix).filter(i => i >= 0)), groups = [];
+    h.forEach((x, i) => {
+      if (base.has(i) || !x) return;
+      if (/date/.test(x)) groups.push({ date: i, by: -1, remarks: -1, result: -1, label: H[i] });
+      else if (groups.length) {
+        const g = groups[groups.length - 1];
+        if (g.by < 0 && /counsell?or|counselledby|teacher|faculty/.test(x)) g.by = i;
+        else if (g.remarks < 0 && /remark|comment|note/.test(x)) g.remarks = i;
+        else if (g.result < 0 && /result|attendance|present/.test(x)) g.result = i;
+      }
+    });
+    const tm = teacherMatcher(opts.teachers), unknownBy = {}, roster = new Map(), hist = new Map();
+    let left = 0, absent = 0;
+    const addHist = (roll, raw, byRaw, remarks, res, sheet, X, label) => {
+      const d = dayOf(raw);
+      if (!d) { add('warn', sheet, X, `${label} for roll ${roll} is "${S(raw)}", which is not a date; that counselling is not counted.`, 'Write the date as dd-mm-yyyy.'); return; }
+      const day = iso(d);
+      if (weekEnd && day > weekEnd) { add('warn', sheet, X, `${label} for roll ${roll} is ${day}, after this week; it is not counted.`, 'Check the date.'); return; }
+      if (res === 'Absent') { absent++; return; }
+      const by = tm(byRaw); if (S(byRaw) && !by) unknownBy[S(byRaw)] = (unknownBy[S(byRaw)] || 0) + 1;
+      const k = roll + '|' + day, o = hist.get(k);
+      if (o) { if (!o.remarks && remarks) o.remarks = remarks; return; }
+      hist.set(k, { roll, date: day, by: by || S(byRaw).toUpperCase(), byRaw: S(byRaw), remarks: S(remarks) });
+    };
+    for (let r = hr + 1; r < sSh.rows.length; r++) {
+      const row = sSh.rows[r] || [], X = r + 1; if (!row.some(v => S(v))) continue;
+      const rawRoll = row[ix.roll], roll = normRoll(rawRoll), name = S(row[ix.name]).replace(/\s+/g, ' '), batch = normBatch(row[ix.batch]);
+      const rawShift = row[ix.shift], shift = normShift(rawShift), status = ix.status >= 0 ? normStatus(row[ix.status]) : 'Active';
+      if (!roll) { add('error', sSh.name, X, S(rawRoll) ? `Roll No "${S(rawRoll)}" is not a number; the row is not used.` : 'Roll No is empty; the row is not used.', 'Type the roll number as digits only, or delete the row.'); continue; }
+      if (roster.has(roll)) { const o = roster.get(roll); add('lock', sSh.name, X, `Roll ${roll} is on row ${o.row} and again on row ${X}${o.batch !== batch ? ` (batches ${o.batch} and ${batch})` : ''}.`, 'Keep one row per student: delete the old row (move its history to the other row), or correct the roll number.'); continue; }
+      if (!batch) { add('lock', sSh.name, X, `Batch is empty for roll ${roll}.`, 'Type the batch code exactly as in the timetable, for example XA1, or set Status to Left.'); continue; }
+      if (!status) add('warn', sSh.name, X, `Status "${S(row[ix.status])}" for roll ${roll} is not Active or Left; treated as Active.`, 'Write Active or Left.');
+      const s = { roll, name, batch, shift, status: status || 'Active', row: X };
+      if (!name) add('warn', sSh.name, X, `Student Name is empty for roll ${roll}.`, 'Add the name.');
+      if (s.status !== 'Left' && !shift) add('lock', sSh.name, X, S(rawShift) ? `Shift "${S(rawShift)}" for roll ${roll} is not Morning or Evening.` : `Shift is empty for roll ${roll}.`, 'Write Morning if the student has classes in the morning, Evening if in the evening.');
+      roster.set(roll, s); if (s.status === 'Left') left++;
+      for (const g of groups) {
+        const raw = row[g.date]; if (raw === null || raw === undefined || S(raw) === '') continue;
+        addHist(roll, raw, g.by >= 0 ? row[g.by] : '', g.remarks >= 0 ? row[g.remarks] : '', g.result >= 0 ? normResult(row[g.result]) : 'Done', sSh.name, X, `"${g.label}"`);
+      }
+    }
+    // the old separate history sheet, if the file has one
+    const hSh = sheets.find(s => s !== sSh && /history/i.test(S(s.name)));
+    if (hSh) {
+      const hh = (hSh.rows[0] || []).map(normH), hc = f => hh.findIndex(f);
+      const c = { roll: hc(x => x.startsWith('roll')), date: hc(x => x === 'date' || x.endsWith('date')), by: hc(x => /counsell?or|teacher|code/.test(x)), result: hc(x => /result|attendance/.test(x)), remarks: hc(x => /remark/.test(x)) };
+      if (c.roll >= 0 && c.date >= 0) for (let r = 1; r < hSh.rows.length; r++) {
+        const row = hSh.rows[r] || [], X = r + 1; if (!row.some(v => S(v))) continue;
+        const roll = normRoll(row[c.roll]); if (!roll) continue;
+        if (!roster.has(roll)) { add('warn', hSh.name, X, `Roll ${roll} is not in the student list; this counselling is not used.`, 'Add the student to the list, or delete the row.'); continue; }
+        if (row[c.date] === null || S(row[c.date]) === '') continue;
+        addHist(roll, row[c.date], c.by >= 0 ? row[c.by] : '', c.remarks >= 0 ? row[c.remarks] : '', c.result >= 0 ? normResult(row[c.result]) : 'Done', hSh.name, X, 'Date');
+      }
+    }
+    for (const [v, n] of Object.entries(unknownBy).sort((a, b) => b[1] - a[1])) add('warn', 'Counselling history', null, `Counsellor "${v}" (${n} counselling${n > 1 ? 's' : ''}) is not a short name or full name in the Teachers section. These counsellings still count.`, `Add ${v} to the Teachers section, or write the teacher's short name.`);
+    if (absent) add('info', 'Counselling history', null, `${absent} counselling${absent > 1 ? 's are' : ' is'} marked Absent and not counted.`);
+    if (left) add('info', sSh.name, null, `${left} student${left > 1 ? 's are' : ' is'} marked Left and will not be booked.`);
+    const students = [...roster.values()];
+    if (!students.length) return { ok: false, fatal: `No student rows were found on the "${sSh.name}" sheet.`, issues };
+    const stats = { students: students.length - left, left, history: hist.size, absent, locks: issues.filter(i => i.level === 'lock').length, errors: issues.filter(i => i.level === 'error').length, warnings: issues.filter(i => i.level === 'warn').length, groups: groups.length };
+    return { ok: true, students, history: [...hist.values()], issues, stats, sheet: sSh.name };
+  }
+  // data: { students: [...], history: [...] } from readStudentList; extra: saved weekly records [{roll, date, by, remarks}]
+  function buildStudentsV2(data, weekStart, extra) {
+    const m = new Map();
+    for (const s of data.students) m.set(s.roll, { ...s, hist: new Map() });
+    const addH = (roll, date, by, remarks) => { const s = m.get(S(roll)); if (!s || !date) return; const o = s.hist.get(date); if (!o) s.hist.set(date, { date, by: S(by), remarks: S(remarks) }); else { if (!o.by && by) o.by = S(by); if (!o.remarks && remarks) o.remarks = S(remarks); } };
+    for (const x of data.history || []) addH(x.roll, x.date, x.by, x.remarks);
+    for (const x of extra || []) addH(x.roll, x.date, x.by, x.remarks);
+    const wEnd = weekStart ? addDays(weekStart, 6) : '';
+    for (const s of m.values()) {
+      const all = [...s.hist.values()].sort((a, b) => a.date < b.date ? -1 : 1);
+      const before = weekStart ? all.filter(x => x.date < weekStart) : all;
+      s.allHistory = all; s.history = before; s.times = before.length; s.last = before.length ? before[before.length - 1].date : '';
+      s.thisWeek = weekStart ? all.filter(x => x.date >= weekStart && x.date <= wEnd) : [];
+      s.teachersSeen = new Set(before.map(x => x.by)); delete s.hist;
+    }
+    return m;
+  }
+  // the main file: the student list with every counselling, newest first. weekRecs: this week's counsellings to add [{roll, date, by, remarks}]
+  function fillStudentList(wb, data) {
+    const NAVY = 'FF1F3864', solid = argb => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
+    const how = wb.addWorksheet('How to fill');
+    [['Counselling Planner: student list', 't'],
+      ['One row per student. Upload it once on the Set up page; the planner adds each week’s counsellings to it.', ''], ['', ''],
+      ['Columns', 'h'],
+      ['Roll No (required): digits only. Each roll number once.', ''],
+      ['Student Name (required).', ''],
+      ['Batch (required): exactly as in the faculty timetable, for example XA1.', ''],
+      ['Shift (required): when the student has classes, Morning or Evening. Morning students are counselled only in the evening, evening students only in the morning.', ''],
+      ['Status: Active or Left. Empty means Active. Students marked Left are never booked; their history is kept.', ''],
+      ['Last counselled date, Last counsellor, Remarks: the most recent counselling. Then 2nd last, 3rd last and so on. Add more groups of three columns when needed.', ''],
+      ['Counsellor: the teacher’s short name (as in the timetable) or full name, as in the Teachers section.', ''],
+      ['', ''],
+      ['What the planner checks', 'h'],
+      ['The schedule stays locked until these are fixed: a roll number twice, an empty batch, an empty or wrong Shift, a batch that is not in this week’s timetable.', ''],
+      ['Warnings do not lock it: a date that is not a date, an unknown counsellor, an empty name.', ''],
+      ['Do not rename the column headings in row 1.', '']
+    ].forEach(([t, k], i) => { const c = how.getCell(i + 1, 1); c.value = t; c.font = { name: 'Arial', size: k === 't' ? 14 : 10, bold: !!k, color: { argb: k ? NAVY : 'FF000000' } }; c.alignment = { wrapText: true, vertical: 'top' }; });
+    how.getColumn(1).width = 110;
+    const list = data.students || [], extra = data.weekRecs || [], byRoll = {};
+    for (const x of extra) (byRoll[x.roll] = byRoll[x.roll] || []).push(x);
+    const hists = list.map(s => { const m = new Map((s.allHistory || s.history || []).map(x => [x.date, x])); for (const x of byRoll[s.roll] || []) if (!m.has(x.date)) m.set(x.date, x); return [...m.values()].sort((a, b) => a.date < b.date ? 1 : -1); });
+    const nG = Math.max(3, ...hists.map(h => h.length));
+    const cols = SL.base.concat(...Array.from({ length: nG }, (_, i) => SL.group(i + 1)));
+    const ws = wb.addWorksheet(SL.sheet, { views: [{ state: 'frozen', ySplit: 1, xSplit: 2 }] });
+    const r1 = ws.getRow(1); cols.forEach((c, i) => { const x = r1.getCell(i + 1); x.value = c; x.font = { name: 'Arial', bold: true, color: { argb: 'FFFFFFFF' } }; x.fill = solid(i < 4 ? NAVY : 'FF2F5597'); x.alignment = { vertical: 'middle', wrapText: true }; });
+    r1.height = 30; [12, 28, 9, 10, 9].forEach((w, i) => ws.getColumn(i + 1).width = w);
+    for (let g = 0; g < nG; g++) { ws.getColumn(6 + g * 3).width = 13; ws.getColumn(6 + g * 3).numFmt = 'dd-mm-yyyy'; ws.getColumn(7 + g * 3).width = 12; ws.getColumn(8 + g * 3).width = 34; }
+    ws.getColumn(1).numFmt = '0';
+    const tn = data.teachers || {};
+    list.forEach((s, i) => {
+      const v = [/^\d{1,15}$/.test(s.roll) ? Number(s.roll) : s.roll, s.name, s.batch, s.shift || '', s.status || 'Active'];
+      for (const x of hists[i]) v.push(new Date(x.date + 'T00:00:00Z'), x.by || '', x.remarks || '');
+      ws.getRow(i + 2).values = v;
+    });
+    const n = Math.max(20000, list.length + 5000);
+    ws.dataValidations.add(`D2:D${n}`, { type: 'list', allowBlank: true, formulae: ['"Morning,Evening"'], showErrorMessage: true, errorStyle: 'error', errorTitle: 'Shift', error: 'Choose Morning or Evening.' });
+    ws.dataValidations.add(`E2:E${n}`, { type: 'list', allowBlank: true, formulae: ['"Active,Left"'], showErrorMessage: true, errorStyle: 'error', errorTitle: 'Status', error: 'Choose Active or Left.' });
+    const lw = wb.addWorksheet('Teachers'); lw.getRow(1).values = ['Short name', 'Full name']; lw.getRow(1).font = { bold: true };
+    Object.keys(tn).sort().forEach((c, i) => { lw.getCell(i + 2, 1).value = c; lw.getCell(i + 2, 2).value = (tn[c] && tn[c].name) || ''; });
+    lw.getColumn(1).width = 12; lw.getColumn(2).width = 30;
+    return wb;
+  }
+
+  /* Teachers section: short name, full name, subject, batches taught, batches to counsel, senior (never moved). Set once, edited in the app. */
+  const TS = { sheet: 'Teachers', cols: ['Short name', 'Full name', 'Subject', 'Batches taught', 'Batches to counsel', 'Senior (never moved)'] };
+  const splitBatches = v => [...new Set(S(v).split(/[,;\/\n+]+/).map(normBatch).filter(Boolean))];
+  const yes = v => /^(y|yes|true|1|senior)$/i.test(S(v));
+  function readTeachers(sheets) {
+    const sh = sheets.find(s => /^teachers?$/i.test(S(s.name))) || sheets.find(s => (s.rows[0] || []).map(normH).some(x => x.startsWith('short')));
+    if (!sh) return { ok: false, fatal: 'No "Teachers" sheet was found. Download the teachers template from Set up, fill it in and upload it again.' };
+    const h = (sh.rows[0] || []).map(normH), f = t => h.findIndex(t);
+    const c = { code: f(x => x.startsWith('short') || x === 'code' || x === 'teachercode'), name: f(x => x === 'fullname' || x === 'name' || x === 'teachername'), subject: f(x => x.startsWith('subject')),
+      taught: f(x => x.includes('taught') || x === 'batchesteaches'), counsel: f(x => x.includes('counsel')), senior: f(x => x.startsWith('senior')) };
+    if (c.code < 0 || c.counsel < 0) return { ok: false, fatal: `The "${sh.name}" sheet needs the columns "Short name" and "Batches to counsel" in row 1.` };
+    const out = {}, issues = [], add = (level, row, msg) => issues.push({ level, sheet: sh.name, row, msg });
+    for (let r = 1; r < sh.rows.length; r++) {
+      const row = sh.rows[r] || [], X = r + 1; if (!row.some(v => S(v))) continue;
+      const code = S(row[c.code]).toUpperCase().replace(/\s+/g, ''); if (!code) { add('error', X, 'Short name is empty; the row is not used.'); continue; }
+      const o = out[code] || (out[code] = { name: '', subject: '', taught: [], counsel: [], senior: false });
+      if (c.name >= 0 && S(row[c.name])) o.name = S(row[c.name]);
+      if (c.subject >= 0 && S(row[c.subject])) o.subject = S(row[c.subject]);
+      if (c.taught >= 0) o.taught = [...new Set(o.taught.concat(splitBatches(row[c.taught])))];
+      o.counsel = [...new Set(o.counsel.concat(splitBatches(row[c.counsel])))];
+      if (c.senior >= 0 && yes(row[c.senior])) o.senior = true;
+    }
+    if (!Object.keys(out).length) return { ok: false, fatal: `No teacher rows were found on the "${sh.name}" sheet.`, issues };
+    return { ok: true, teachers: out, issues };
+  }
+  // batches each teacher teaches this week, from the timetable (used only to fill "Batches taught" when asked)
+  function taughtFromTimetable(tt, settings) {
+    const ctx = makeCtx(tt, settings), out = {};
+    for (const e of tt.entries) if (e.room && !ctx.isCounsel(e) && !ctx.isDoubt(e.room)) for (const b of roomBatches(e.room)) (out[e.t] = out[e.t] || new Set()).add(b);
+    return Object.fromEntries(Object.entries(out).map(([t, s]) => [t, [...s].sort(nat)]));
+  }
+  function fillTeachersTemplate(wb, data) {
+    const NAVY = 'FF1F3864', solid = argb => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
+    const how = wb.addWorksheet('How to fill');
+    [['Counselling Planner: teachers', 't'], ['One row per teacher. Upload it once on the Set up page; after that, edit teachers in the app.', ''], ['', ''],
+      ['Short name (required): the code used in the timetable, for example ARV.', ''], ['Full name, Subject: for the schedule and the reports.', ''],
+      ['Batches taught: the batches this teacher teaches, separated by commas.', ''],
+      ['Batches to counsel (required for every teacher with a counselling slot): the batches whose students this teacher counsels, separated by commas, for example XA1, XA2.', ''],
+      ['Senior (never moved): Yes for teachers whose counselling slot is never moved when cabins are full.', '']
+    ].forEach(([t, k], i) => { const x = how.getCell(i + 1, 1); x.value = t; x.font = { name: 'Arial', size: k === 't' ? 14 : 10, bold: !!k, color: { argb: k ? NAVY : 'FF000000' } }; x.alignment = { wrapText: true }; });
+    how.getColumn(1).width = 110;
+    const ws = wb.addWorksheet(TS.sheet, { views: [{ state: 'frozen', ySplit: 1 }] });
+    const r1 = ws.getRow(1); TS.cols.forEach((c, i) => { const x = r1.getCell(i + 1); x.value = c; x.font = { name: 'Arial', bold: true, color: { argb: 'FFFFFFFF' } }; x.fill = solid([0, 4].includes(i) ? NAVY : 'FF2F5597'); });
+    [12, 28, 14, 30, 30, 12].forEach((w, i) => ws.getColumn(i + 1).width = w);
+    const T = data.teachers || {}, taught = data.taught || {};
+    Object.keys(T).sort().forEach((code, i) => { const t = T[code] || {}; ws.getRow(i + 2).values = [code, t.name || '', t.subject || '', (t.taught && t.taught.length ? t.taught : taught[code] || []).join(', '), (t.counsel || []).join(', '), t.senior ? 'Yes' : 'No']; });
+    ws.dataValidations.add('F2:F2000', { type: 'list', allowBlank: true, formulae: ['"Yes,No"'] });
+    return wb;
+  }
+
+  /* Input checks. level 'lock': the schedule stays hidden until it is fixed; 'warn': shown, does not lock. Each has where and how to fix. */
+  function checkInputs(o) {
+    const out = [], add = (level, what, where, fix) => out.push({ level, what, where: where || '', fix: fix || '' });
+    const s = o.settings, T = s.teachers || {}, skip = new Set((s.skipBatches || []).map(normBatch));
+    if (!o.tt) add('lock', 'The faculty timetable is not uploaded.', 'Files', 'Upload this week’s faculty timetable.');
+    if (!o.students) add('lock', 'The student list is not uploaded.', 'Files', 'Upload the student list.');
+    if (o.tt && !s.weekStart) add('lock', 'The week date was not found in the timetable title.', 'Faculty timetable, title', 'Write the week in the title, for example "Time Table for the week of 26 Oct 2026 to 31 Oct 2026", or set the Monday under Advanced settings.');
+    if (!(s.cabins || []).filter(Boolean).length) add('lock', 'No counselling cabin is set.', 'Advanced settings, Cabins', 'Add at least one cabin.');
+    for (const i of o.fileIssues || []) if (i.level === 'lock') add('lock', i.msg, `${i.sheet}${i.row ? ' row ' + i.row : ''}`, i.fix);
+    if (!o.tt || !o.students) return out;
+    const ctx = makeCtx(o.tt, s), ttB = [...ctx.occ.keys()].filter(b => !ctx.isDoubt(b) && !/counsel/i.test(b)), ttSet = new Set(ttB);
+    const active = [...o.students.values()].filter(x => x.status !== 'Left'), byB = {};
+    for (const x of active) (byB[x.batch] = byB[x.batch] || []).push(x);
+    const SH = activeShifts(s), ct = [...new Set(o.tt.entries.filter(e => ctx.isCounsel(e) && SH.includes(e.slot)).map(e => e.t))].sort();
+    for (const t of ct) {
+      const x = T[t];
+      if (!x) add('lock', `${t} has a counselling slot this week but is not in the Teachers section.`, `Timetable, teacher ${t}`, `Add ${t} in the Teachers section with the batches they counsel.`);
+      else if (!(x.counsel || []).length) add('lock', `${t}${x.name ? ' (' + x.name + ')' : ''} has a counselling slot this week but no batches to counsel.`, `Teachers section, ${t}`, `Fill “Batches to counsel” for ${t}.`);
+    }
+    for (const b of Object.keys(byB).sort(nat)) {
+      if (ttSet.has(b) || skip.has(b)) continue;
+      const near = nearMatch(b, ttB);
+      add('lock', `Batch ${b} (${byB[b].length} students) is not in this week’s timetable, so its free periods are unknown.`, `Student list, batch ${b}`,
+        near ? `The timetable has ${near}. If that is the same batch, correct the code in the student list. Otherwise tick “Skip this week” for ${b}.` : `Correct the batch code in the student list, or tick “Skip this week” for ${b}.`);
+    }
+    const counselB = new Set(); for (const x of Object.values(T)) for (const b of x.counsel || []) counselB.add(normBatch(b));
+    const noStu = [...counselB].filter(b => !byB[b]).sort(nat);
+    if (noStu.length) add('warn', `${noStu.length} batch${noStu.length > 1 ? 'es' : ''} in “Batches to counsel” ${noStu.length > 1 ? 'have' : 'has'} no students in the student list: ${noStu.join(', ')}.`, 'Teachers section', 'Check the spelling, or remove them.');
+    const orphan = Object.keys(byB).filter(b => !counselB.has(b) && !skip.has(b)).sort(nat);
+    if (orphan.length) add('warn', `${orphan.length} batch${orphan.length > 1 ? 'es have' : ' has'} no teacher to counsel ${orphan.length > 1 ? 'them' : 'it'}, so ${orphan.reduce((a, b) => a + byB[b].length, 0)} students are never booked: ${orphan.join(', ')}.`, 'Teachers section', 'Add these batches to “Batches to counsel” of at least one teacher.');
+    const notTT = Object.keys(T).filter(t => !o.tt.teachers.includes(t) && (T[t].counsel || []).length);
+    if (notTT.length) add('info', `${notTT.length} teacher${notTT.length > 1 ? 's' : ''} in the Teachers section ${notTT.length > 1 ? 'are' : 'is'} not in this week’s timetable: ${notTT.join(', ')}.`, 'Teachers section', 'Nothing to do unless they should counsel this week.');
+    for (const r of batchTimetable(o.tt, s, o.students).filter(r => r.flag)) add('warn', `Batch ${r.batch}: ${r.flag}`, `Batch timetable, ${r.batch}`, r.fix);
+    for (const i of o.fileIssues || []) if (i.level === 'warn') add('warn', i.msg, `${i.sheet}${i.row ? ' row ' + i.row : ''}`, i.fix);
+    if (skip.size) add('info', `Skipped this week: ${[...skip].join(', ')}.`, 'Student list', 'Untick “Skip this week” when the batch code is fixed.');
+    return out;
+  }
+  // which batch has class when, next to the Shift column of its students; flags where the two disagree
+  function batchTimetable(tt, settings, students) {
+    const ctx = makeCtx(tt, settings), byB = {};
+    for (const x of students.values()) if (x.status !== 'Left') (byB[x.batch] = byB[x.batch] || []).push(x);
+    const all = [...new Set([...Object.keys(byB), ...[...ctx.occ.keys()].filter(b => !ctx.isDoubt(b) && !/counsel/i.test(b))])].sort(nat);
+    return all.map(b => {
+      const arr = byB[b] || [], m = arr.filter(x => x.shift === 'Morning').length, e = arr.filter(x => x.shift === 'Evening').length;
+      const occ = ctx.occ.get(b) || new Set(), days = {};
+      for (const d of DAYS) days[d] = SLOTS.filter(sl => occ.has(d + '|' + sl));
+      const eDays = DAYS.filter(d => days[d].some(x => x[0] === 'E')), mDays = DAYS.filter(d => days[d].some(x => x[0] === 'M'));
+      let flag = '', fix = '';
+      if (!arr.length) { flag = ''; }
+      else if (!ctx.occ.has(b)) { flag = 'not in the timetable.'; fix = 'See the input checks.'; }
+      else if (m && e) { flag = `${m} students are marked Morning and ${e} Evening.`; fix = 'A batch usually has one shift: check the Shift column for this batch.'; }
+      else if (m && eDays.length) { flag = `students are marked Morning, but the timetable has evening classes on ${eDays.join(', ')}. They are not booked in those periods.`; fix = 'Check the Shift column or the timetable.'; }
+      else if (e && mDays.length) { flag = `students are marked Evening, but the timetable has morning classes on ${mDays.join(', ')}. They are not booked in those periods.`; fix = 'Check the Shift column or the timetable.'; }
+      return { batch: b, students: arr.length, morning: m, evening: e, shift: m && !e ? 'Morning' : e && !m ? 'Evening' : m && e ? 'Mixed' : '', inTimetable: ctx.occ.has(b), days, flag, fix };
+    });
+  }
+
   /* ---------- core rules ---------- */
   function makeCtx(tt, settings) {
     const cell = new Map(); const occ = new Map();
     for (const e of tt.entries) {
       cell.set(e.t + '|' + e.day + '|' + e.slot, e);
-      if (e.room) { if (!occ.has(e.room)) occ.set(e.room, new Set()); occ.get(e.room).add(e.day + '|' + e.slot); }
+      if (e.room) for (const b of roomBatches(e.room)) { if (!occ.has(b)) occ.set(b, new Set()); occ.get(b).add(e.day + '|' + e.slot); }
     }
     const kw = settings.keyword.toLowerCase();
     const isCounsel = e => (e.room + ' ' + e.subj).toLowerCase().includes(kw);
@@ -461,7 +740,7 @@
       const x = S(code); if (!x) return null;
       if (x.toLowerCase().startsWith('m3 old')) return 'M3 old';
       const first = x.split(/\s+/)[0]; if (known.has(first)) return first;
-      return settings.batchBuildings[x] || null;
+      return settings.batchBuildings[x] || settings.batchBuildings[roomBatches(x)[0]] || null;
     }
     const slotLen = sl => toSec(settings.shifts[sl][1]) - toSec(settings.shifts[sl][0]);
     const unit = sl => slotLen(sl) / settings.baseStudents;
@@ -493,7 +772,7 @@
     const tClass = t => setCls(t) || (teaching.has(t) ? '' : 'FTP');
     const inferredFTP = t => !setCls(t) && !teaching.has(t);
     const senior = new Set(list(settings.seniorClasses || ''));
-    const isSenior = t => settings.protectSenior !== false && senior.has(tClass(t));
+    const isSenior = t => settings.protectSenior !== false && ((settings.teachers[t] || {}).senior === true || ((settings.teachers[t] || {}).senior === undefined && senior.has(tClass(t))));
     return { cell, occ, isCounsel, isDoubt, building, compute, teacherFree, unit, split, cabinsAll, cabinBld, siteOfCabin, cabinsFor, siteOfBatch, tClass, inferredFTP, isSenior };
   }
   const SITE_NAME = { PC: 'PC campus', Main: 'the main campus', All: 'any building' };
@@ -595,132 +874,78 @@
     return out;
   }
 
-  /* Step 3+4: match students */
-  // keep: { slotId: [[roll, basis], ...] } – students already booked; they stay in their slot and only empty seats are filled
+  /* Step 3+4: match students (Logic v2, 6 Nov 2026) */
+  // Only four rules are never broken:
+  //  1. the student's batch is in this teacher's "Batches to counsel" (Teachers section);
+  //  2. the period is in the student's opposite shift (Shift column) and the batch has no class then (timetable);
+  //  3. the student is not marked Left (and their batch is not skipped this week);
+  //  4. one counselling per student per week (bookings this week and counsellings already held this week).
+  // Plus the campus rule: students whose batch is at PC go only to PC cabins, and the other way round.
+  // Order: each batch is a queue in roll-number order. Students still due this round (fewest counsellings in their batch)
+  // come first, in roll order; when a batch has finished its round it starts again from the first roll number.
+  // The slot with the fewest possible students picks first, one seat at a time.
+  // keep: { slotId: [[roll, basis], ...] } – bookings already made; each is checked again and dropped when no longer valid
   function assignStudents(plan, tt, settings, students, keep) {
-    const ctx = makeCtx(tt, settings);
-    const groups = settings.classGroups.split('|').map(g => g.split(',').map(S).filter(Boolean));
-    const groupOf = cls => { const i = groups.findIndex(g => g.includes(cls)); return i < 0 ? 'cls:' + cls : 'g' + i; };
-    const tcls = ctx.tClass;
-    // batch class = majority class of teachers teaching its regular classes (FTP teachers do not vote)
-    const votes = {};
-    for (const e of tt.entries) {
-      if (!e.room || ctx.isCounsel(e) || ctx.isDoubt(e.room)) continue; const c = tcls(e.t); if (!c || c === 'FTP') continue;
-      (votes[e.room] = votes[e.room] || {})[c] = (votes[e.room][c] || 0) + 1;
+    const ctx = makeCtx(tt, settings), T = settings.teachers || {}, skip = new Set((settings.skipBatches || []).map(normBatch));
+    const counselOf = t => new Set(((T[t] || {}).counsel || []).map(normBatch).filter(Boolean));
+    const byBatch = new Map(); let leftN = 0, skipN = 0;
+    for (const s of students.values()) {
+      if (s.status === 'Left') { leftN++; continue; }
+      if (skip.has(s.batch)) { skipN++; continue; }
+      if (!byBatch.has(s.batch)) byBatch.set(s.batch, []); byBatch.get(s.batch).push(s);
     }
-    const batchCls = {}; for (const b in votes) batchCls[b] = Object.entries(votes[b]).sort((a, b2) => b2[1] - a[1])[0][0];
-    const own = {}; for (const s of students.values()) if (s.cls) (own[s.batch] = own[s.batch] || {})[s.cls] = (own[s.batch][s.cls] || 0) + 1;
-    for (const b in own) batchCls[b] = Object.entries(own[b]).sort((a, b2) => b2[1] - a[1])[0][0];
-    const byBatch = new Map(); for (const s of students.values()) { if (!byBatch.has(s.batch)) byBatch.set(s.batch, []); byBatch.get(s.batch).push(s); }
-    for (const arr of byBatch.values()) arr.sort((a, b) => (a.last || '') < (b.last || '') ? -1 : (a.last || '') > (b.last || '') ? 1 : (a.roll < b.roll ? -1 : 1));
-    const classShifts = new Map();
-    for (const [b, set] of ctx.occ) classShifts.set(b, new Set([...set].map(k => k.split('|')[1][0])));
-    const opposite = settings.oppositeShiftOnly !== false;
-    // a student is free when their batch has no class in that period and, if opposite-shift-only is on,
-    // the counselling period is in the shift where the batch has no classes at all
-    const freeAt = (b, d, sl) => ctx.occ.has(b) && !ctx.occ.get(b).has(d + '|' + sl) && (!opposite || !classShifts.get(b).has(sl[0]));
-    const direct = {};
-    for (const e of tt.entries) if (e.room && !ctx.isCounsel(e) && !ctx.isDoubt(e.room)) (direct[e.t] = direct[e.t] || new Set()).add(e.room);
-    const used = new Set(); const assign = []; let repeatSkips = 0, gapSkips = 0, roundSkips = 0, classSkips = 0; const count = new Map();
-    const gapCut = settings.minGapDays > 0 && settings.weekStart ? addDays(settings.weekStart, -settings.minGapDays) : '';
-    const shiftOf = b => { let m = 0, e = 0; (ctx.occ.get(b) || []).forEach(k => k.split('|')[1][0] === 'M' ? m++ : e++); return m >= e ? 'Morning' : 'Evening'; };
-    const allB = [...byBatch.keys()].filter(b => ctx.occ.has(b));
-    // students only meet a teacher of their own class group (11th with 11th and FTP, 12th with 12th, Target with Target by default)
-    const classOk = (b, t) => settings.strictClass === false || !tcls(t) || !batchCls[b] || groupOf(tcls(t)) === groupOf(batchCls[b]);
+    const rollCmp = (a, b) => a.roll.length - b.roll.length || (a.roll < b.roll ? -1 : a.roll > b.roll ? 1 : 0);
+    const batchMin = {}, rank = new Map();
+    for (const [b, arr] of byBatch) {
+      arr.sort(rollCmp); batchMin[b] = Math.min(...arr.map(s => s.times));
+      let i = 0, j = 0; for (const s of arr) rank.set(s.roll, s.times <= batchMin[b] ? i++ : j++);
+    }
+    const due = s => s.times <= batchMin[s.batch];
+    const shiftOk = (s, p) => s.shift === 'Morning' ? p.shift[0] === 'E' : s.shift === 'Evening' ? p.shift[0] === 'M' : false;
     const placeOk = (b, p) => ctx.siteOfBatch(b) === p.site;
-    // Rule order, so no two rules fight:
-    //  1. Must hold (never broken): the student is free (no class then; opposite shift if that is on), same campus,
-    //     same class group (if strict), allowed by at least one matching rule, booked once a week, the minimum gap.
-    //  2. Preferences, in this order: due this round (counted inside each class group) > has not met this teacher >
-    //     earlier matching rule (e.g. "Teaches the batch") > counselled longest ago.
-    //  Seats are filled in passes: pass 1 keeps every preference as a rule; pass 2 lets in students already counselled
-    //  this round; pass 3 lets in students who met this teacher before. So a seat stays empty only when no free student
-    //  of that class group is left. Within a pass the slots with the fewest candidates pick first, one seat at a time.
-    const gOfB = b => batchCls[b] ? groupOf(batchCls[b]) : 'none';
-    const reachable = allB.filter(b => plan.some(p => freeAt(b, p.day, p.shift) && placeOk(b, p)));
-    const activeStu = reachable.flatMap(b => byBatch.get(b) || []);
-    const minTimes = activeStu.length ? Math.min(...activeStu.map(s => s.times)) : 0;
-    const minBy = {}; for (const s of activeStu) { const g = gOfB(s.batch); minBy[g] = Math.min(minBy[g] === undefined ? Infinity : minBy[g], s.times); }
-    const due = s => s.times <= (minBy[gOfB(s.batch)] === undefined ? minTimes : minBy[gOfB(s.batch)]);
-    const roundOn = settings.onceRound !== false;
-    // trace: for every slot, why each batch and each student was left out (first reason wins)
-    const trace = {};
-    const tr = pid => trace[pid] || (trace[pid] = { rules: [], batch: new Map(), stu: new Map() });
-    const note = (m, key, why) => { if (!m.has(key)) m.set(key, why); };
-    const tMatch = (r, t) => {
-      const v = list(r.tValue);
-      if (r.tType === 'class') return v.includes(tcls(t));
-      if (r.tType === 'codes') return v.includes(t);
-      if (r.tType === 'subject') return v.map(x => x.toLowerCase()).includes(((settings.teachers[t] || {}).subject || '').toLowerCase());
-      return true;
-    };
-    const pool = (r, t) => {
-      const v = list(r.sValue);
-      switch (r.sType) {
-        case 'taught': return [...(direct[t] || [])].filter(b => byBatch.has(b));
-        case 'group': { if (!tcls(t)) return []; const g = groupOf(tcls(t)); return allB.filter(b => batchCls[b] && groupOf(batchCls[b]) === g); }
-        case 'class': return allB.filter(b => v.includes(batchCls[b]));
-        case 'batches': return v.filter(b => byBatch.has(b));
-        case 'prefix': return allB.filter(b => v.some(x => b.toUpperCase().startsWith(x.toUpperCase())));
-        case 'any': return allB;
-      }
-      return [];
-    };
-    const rules = (settings.rules && settings.rules.length ? settings.rules : defaultRules()).filter(r => r.on);
+    const busyAt = (b, p) => ctx.occ.has(b) && ctx.occ.get(b).has(p.day + '|' + p.shift);
+    const used = new Set(), count = new Map(), assign = [], dropped = [];
+    const trace = {}, tr = pid => trace[pid] || (trace[pid] = { batch: new Map(), stu: new Map(), note: '' });
+    const note = (m, k, w) => { if (!m.has(k)) m.set(k, w); };
+    // bookings already made stay, but only while they are still valid
     if (keep) for (const p of plan) for (const [roll, basis] of (keep[p.id] || [])) {
-      const s = students.get(roll); if (!s || used.has(roll) || (count.get(p.id) || 0) >= p.k) continue;
+      const s = students.get(roll); let why = '';
+      if (!s) why = 'is no longer in the student list';
+      else if (s.status === 'Left') why = 'is marked Left';
+      else if (used.has(roll)) why = 'is already booked in another slot';
+      else if ((count.get(p.id) || 0) >= p.k) why = 'did not fit: the slot has fewer seats now';
+      else if (busyAt(s.batch, p)) why = `has a class then (batch ${s.batch})`;
+      else if (!shiftOk(s, p)) why = `is not in the opposite shift (${s.shift || 'no shift'} student, ${p.shift} slot)`;
+      if (why) { dropped.push(`Roll ${roll} was taken out of ${p.t}'s ${p.day} ${p.shift} slot: the student ${why}. They keep their place in the queue.`); continue; }
       used.add(roll); count.set(p.id, (count.get(p.id) || 0) + 1); assign.push({ pid: p.id, s, basis: basis || 'Kept' }); tr(p.id).stu.set(roll, 'booked');
     }
-    const ruleMiss = (r, t) => r.sType === 'taught' ? `${t} teaches no batch that is in the student file`
-      : r.sType === 'group' ? (tcls(t) ? `no batch of ${t}'s class group (${tcls(t)}) is in both the student file and the timetable` : `${t} has no class set in the teacher list`)
-      : 'no batch in the student file matches this rule';
-    // candidates per slot: the union of every matching rule's batches that pass the must-hold checks
-    const assigned = {}; for (const x of settings.teacherBatches || []) (assigned[x.t] = assigned[x.t] || new Set()).add(x.b);
+    // who can sit in each slot
     const cand = plan.map(p => {
-      const T = tr(p.id), firstRule = new Map(), mine = assigned[p.t];
-      if (mine) {
-        const bs = [...mine].filter(b => byBatch.has(b)), R = { rule: 'Assigned batches', batches: bs.length, open: 0 }; T.rules.push(R);
-        if (!bs.length) R.empty = `none of ${p.t}'s assigned batches (${[...mine].join(', ')}) has students in the student file`;
-        for (const b of bs) {
-          const nStu = (byBatch.get(b) || []).length;
-          if (!ctx.occ.has(b)) { note(T.batch, b, ['noTimetable', nStu]); continue; }
-          if (ctx.occ.get(b).has(p.day + '|' + p.shift)) { note(T.batch, b, ['inClass', nStu]); continue; }
-          if (opposite && classShifts.get(b).has(p.shift[0])) { note(T.batch, b, ['sameShift', nStu]); continue; }
-          if (!placeOk(b, p)) { note(T.batch, b, ['campus', nStu]); continue; }
-          R.open++; T.batch.set(b, ['open', nStu]); if (!firstRule.has(b)) firstRule.set(b, [-1, 'Assigned batches']);
+      const Tr = tr(p.id), mine = counselOf(p.t), list = [];
+      if (!T[p.t]) Tr.note = `${p.t} is not in the Teachers section`;
+      else if (!mine.size) Tr.note = `${p.t} has no batches to counsel in the Teachers section`;
+      for (const b of mine) {
+        const arr = byBatch.get(b), n = arr ? arr.length : 0;
+        if (skip.has(b)) { note(Tr.batch, b, ['skipped', n]); continue; }
+        if (!arr) { note(Tr.batch, b, ['noStudents', 0]); continue; }
+        if (!ctx.occ.has(b)) { note(Tr.batch, b, ['noTimetable', n]); continue; }
+        if (busyAt(b, p)) { note(Tr.batch, b, ['inClass', n]); continue; }
+        if (!placeOk(b, p)) { note(Tr.batch, b, ['campus', n]); continue; }
+        let open = 0;
+        for (const s of arr) {
+          if (!shiftOk(s, p)) { note(Tr.stu, s.roll, 'sameShift'); continue; }
+          if (s.thisWeek && s.thisWeek.length) { note(Tr.stu, s.roll, 'doneThisWeek'); continue; }
+          list.push({ s, d: due(s) ? 0 : 1, rel: s.times - batchMin[b], q: rank.get(s.roll) }); open++;
         }
+        Tr.batch.set(b, [open ? 'open' : 'sameShift', n]);
       }
-      if (!(mine && settings.assignedOnly !== false)) rules.forEach((r, ri) => {
-        const name = r.name || 'Rule';
-        if (!tMatch(r, p.t)) { T.rules.push({ rule: name, skipped: 'this rule does not apply to this teacher' }); return; }
-        const bs = pool(r, p.t); if (!bs.length) { T.rules.push({ rule: name, batches: 0, open: 0, empty: ruleMiss(r, p.t) }); return; }
-        const R = { rule: name, batches: bs.length, open: 0 }; T.rules.push(R);
-        for (const b of bs) {
-          const nStu = (byBatch.get(b) || []).length;
-          if (!ctx.occ.has(b)) { note(T.batch, b, ['noTimetable', nStu]); continue; }
-          if (ctx.occ.get(b).has(p.day + '|' + p.shift)) { note(T.batch, b, ['inClass', nStu]); continue; }
-          if (opposite && classShifts.get(b).has(p.shift[0])) { note(T.batch, b, ['sameShift', nStu]); continue; }
-          if (!placeOk(b, p)) { note(T.batch, b, ['campus', nStu]); continue; }
-          if (!classOk(b, p.t)) { classSkips++; note(T.batch, b, ['classGroup', nStu]); continue; }
-          R.open++; T.batch.set(b, ['open', nStu]); if (!firstRule.has(b)) firstRule.set(b, [ri, name]);
-        }
-      });
-      const cl = [];
-      for (const [b, [ri, name]] of firstRule) for (const s of byBatch.get(b) || []) {
-        if (gapCut && s.last && s.last >= gapCut) { gapSkips++; note(T.stu, s.roll, 'gap'); continue; }
-        cl.push({ s, ri, name, met: s.teachersSeen.has(p.t) ? 1 : 0 });
-      }
-      const dueKey = c => roundOn ? (due(c.s) ? 0 : 1) : 0;
-      cl.sort((a, b) => dueKey(a) - dueKey(b) || (roundOn ? a.s.times - b.s.times : 0) || a.met - b.met || a.ri - b.ri || ((a.s.last || '') < (b.s.last || '') ? -1 : (a.s.last || '') > (b.s.last || '') ? 1 : a.s.roll < b.s.roll ? -1 : 1));
-      return { p, list: cl };
+      list.sort((a, b) => a.d - b.d || a.rel - b.rel || a.q - b.q || (a.s.batch < b.s.batch ? -1 : a.s.batch > b.s.batch ? 1 : 0) || rollCmp(a.s, b.s));
+      return { p, list };
     });
-    const passes = [{ round: roundOn, repeat: !!settings.noRepeatTeacher, tag: '' }];
-    if (roundOn) passes.push({ round: false, repeat: !!settings.noRepeatTeacher, tag: 'already counselled this round' });
-    if (settings.noRepeatTeacher) passes.push({ round: false, repeat: false, tag: 'met this teacher before' });
-    const passCount = passes.map(() => 0);
+    // pass 1: students due this round; pass 2: the next round of the same batches (from the first roll number again)
+    const passes = [{ due: true, tag: '' }, { due: false, tag: 'next round' }], passCount = [0, 0];
     passes.forEach((ps, pi) => {
-      const ok = c => !used.has(c.s.roll) && !(ps.round && !due(c.s)) && !(ps.repeat && c.met);
-      if (pi === 0) for (const x of cand) for (const c of x.list) if (!used.has(c.s.roll)) { if (ps.round && !due(c.s)) roundSkips++; else if (ps.repeat && c.met) repeatSkips++; }
+      const ok = c => !used.has(c.s.roll) && (!ps.due || c.d === 0);
       const order = cand.filter(x => (count.get(x.p.id) || 0) < x.p.k).map(x => [x, x.list.filter(ok).length]).sort((a, b) => a[1] - b[1]).map(a => a[0]);
       for (let progress = true; progress;) {
         progress = false;
@@ -728,120 +953,92 @@
           if ((count.get(x.p.id) || 0) >= x.p.k) continue;
           const c = x.list.find(ok); if (!c) continue;
           used.add(c.s.roll); count.set(x.p.id, (count.get(x.p.id) || 0) + 1); passCount[pi]++; progress = true;
-          assign.push({ pid: x.p.id, s: c.s, basis: c.name + (ps.tag ? ` (${ps.tag})` : '') }); tr(x.p.id).stu.set(c.s.roll, 'booked');
+          assign.push({ pid: x.p.id, s: c.s, basis: ps.due ? 'Due this round' : 'Next round' }); tr(x.p.id).stu.set(c.s.roll, 'booked');
         }
       }
     });
-    // why the rest of each slot's candidates were not booked there
-    for (const x of cand) { const T = tr(x.p.id); for (const c of x.list) if (!T.stu.has(c.s.roll)) T.stu.set(c.s.roll, (count.get(x.p.id) || 0) >= x.p.k ? 'seatsFull' : 'bookedElsewhere'); }
+    for (const x of cand) { const Tr = tr(x.p.id); for (const c of x.list) if (!Tr.stu.has(c.s.roll)) Tr.stu.set(c.s.roll, (count.get(x.p.id) || 0) >= x.p.k ? 'seatsFull' : 'bookedElsewhere'); }
     // times
     const byP = {}; assign.forEach(a => (byP[a.pid] = byP[a.pid] || []).push(a));
     const pm = Object.fromEntries(plan.map(p => [p.id, p]));
     const rows = [];
-    for (const pid in byP) byP[pid].sort((a, b) => a.s.roll < b.s.roll ? -1 : 1).forEach((a, i) => { const p = pm[pid]; rows.push({ ...a, p, time: hm(p.start + p.unit * i), batchShift: shiftOf(a.s.batch) }); });
+    for (const pid in byP) byP[pid].sort((a, b) => rollCmp(a.s, b.s)).forEach((a, i) => { const p = pm[pid]; rows.push({ ...a, p, time: hm(p.start + p.unit * i), batchShift: a.s.shift || '' }); });
     rows.sort((a, b) => cmp([DAYS.indexOf(a.p.day), SLOTS.indexOf(a.p.shift), a.p.cabin, a.time], [DAYS.indexOf(b.p.day), SLOTS.indexOf(b.p.shift), b.p.cabin, b.time]));
-    const why = 'no free student of this class group' + (ctx.split ? ' on this campus' : '') + ' is left at this time; see the Why tab';
-    const short = plan.filter(p => (count.get(p.id) || 0) < p.k).map(p => `${p.t} on ${p.day} ${p.shift}${ctx.split ? ` (${SITE_NAME[p.site]})` : ''}: ${count.get(p.id) || 0} of ${p.k} seats filled (${why}).`);
-    const noCls = [...new Set(plan.filter(p => !tcls(p.t)).map(p => p.t))].map(t => `${t} has no class (11th / 12th / Target / FTP) in the teacher list, so only students of batches they teach could be matched.`);
-    const ftp = [...new Set(plan.filter(p => ctx.inferredFTP(p.t)).map(p => p.t))];
-    const ftpNote = ftp.length ? [`Treated as FTP (new teachers, no classes this week, counselling 11th students): ${ftp.join(', ')}. Set their class in the teacher list to change this.`] : [];
-    // coverage of all students in this week's batches, before this week
-    const cov = { active: 0, done: 0, byClass: {} };
-    for (const b of allB) for (const s of byBatch.get(b) || []) {
-      const c = batchCls[b] || 'Not known', x = cov.byClass[c] || (cov.byClass[c] = { active: 0, done: 0, roundDone: 0 });
-      cov.active++; x.active++; if (s.times > 0) { cov.done++; x.done++; } if (!due(s)) x.roundDone++;
-    }
-    cov.round = minTimes + 1; cov.roundDone = activeStu.filter(s => !due(s)).length; cov.byGroup = Object.fromEntries(Object.entries(minBy).map(([g, m]) => [g === 'none' ? 'No class' : g[0] === 'g' ? groups[+g.slice(1)].join(' + ') : g.slice(4), m + 1])); cov.reachable = activeStu.length;
+    const short = plan.filter(p => (count.get(p.id) || 0) < p.k).map(p => `${p.t} on ${p.day} ${p.shift}${ctx.split ? ` (${SITE_NAME[p.site]})` : ''}: ${count.get(p.id) || 0} of ${p.k} seats filled (${tr(p.id).note || 'no more free students of this teacher’s batches at this time'}; see the Why tab).`);
+    // coverage per batch
+    const batches = [...byBatch].map(([b, arr]) => {
+      const dueBefore = arr.filter(due).length, booked = arr.filter(s => used.has(s.roll)).length, bookedDue = arr.filter(s => used.has(s.roll) && due(s)).length, dueAfter = dueBefore - bookedDue;
+      return { batch: b, students: arr.length, round: batchMin[b] + 1, dueBefore, booked, dueAfter, weeks: dueAfter ? (booked ? Math.ceil(dueAfter / booked) : null) : 0,
+        counsellors: Object.keys(T).filter(t => counselOf(t).has(b)), inTimetable: ctx.occ.has(b), never: arr.filter(s => !s.times).length };
+    }).sort((a, b) => nat(a.batch, b.batch));
+    const all = [...byBatch.values()].flat();
+    const coverage = { active: all.length, done: all.filter(s => s.times > 0).length, byClass: {}, roundDone: all.filter(s => !due(s)).length, reachable: all.length, byGroup: {}, round: 1, left: leftN, skipped: skipN, batches };
+    for (const s of all) { const c = s.batch, x = coverage.byClass[c] || (coverage.byClass[c] = { active: 0, done: 0 }); x.active++; if (s.times > 0) x.done++; }
     const slotLog = plan.map(p => {
-      const T = trace[p.id] || { rules: [], batch: new Map(), stu: new Map() };
-      const bz = {}, sz = {};
-      for (const [b, [why, n]] of T.batch) { const x = bz[why] || (bz[why] = { batches: [], students: 0 }); x.batches.push(b); x.students += n; }
-      for (const why of T.stu.values()) sz[why] = (sz[why] || 0) + 1;
-      return { id: p.id, t: p.t, tClass: tcls(p.t) || '', day: p.day, shift: p.shift, site: p.site, cabin: p.cabin, k: p.k, filled: count.get(p.id) || 0, rules: T.rules, batches: bz, students: sz };
+      const Tt = trace[p.id] || { batch: new Map(), stu: new Map(), note: '' }, bz = {}, sz = {};
+      for (const [b, [why, n]] of Tt.batch) { const x = bz[why] || (bz[why] = { batches: [], students: 0 }); x.batches.push(b); x.students += n; }
+      for (const why of Tt.stu.values()) sz[why] = (sz[why] || 0) + 1;
+      return { id: p.id, t: p.t, day: p.day, shift: p.shift, site: p.site, cabin: p.cabin, k: p.k, filled: count.get(p.id) || 0, note: Tt.note, counsel: [...counselOf(p.t)], batches: bz, students: sz };
     });
-    return { rows, repeatSkips, gapSkips, roundSkips, classSkips, minTimes, coverage: cov, batchCls, warnings: [...ftpNote, ...noCls, ...short], counts: Object.fromEntries(plan.map(p => [p.id, count.get(p.id) || 0])), passes: passes.map((ps, i) => ({ tag: ps.tag, booked: passCount[i] })), minBy, slotLog, allB, studentBatches: [...byBatch.keys()], byBatchSize: Object.fromEntries([...byBatch].map(([b, a]) => [b, a.length])) };
+    return { rows, coverage, warnings: [...dropped, ...short], dropped, counts: Object.fromEntries(plan.map(p => [p.id, count.get(p.id) || 0])), passes: passes.map((ps, i) => ({ tag: ps.tag, booked: passCount[i] })),
+      slotLog, allB: [...byBatch.keys()].filter(b => ctx.occ.has(b)), studentBatches: [...byBatch.keys()], byBatchSize: Object.fromEntries([...byBatch].map(([b, a]) => [b, a.length])), batchMin };
   }
 
   /* ---------- the "why" log: every step from files to bookings, in plain words ---------- */
   const B_WHY = {
     noTimetable: 'batch is not in the timetable, so its free periods are unknown',
     inClass: 'batch has a class at this time',
-    sameShift: 'batch studies in this shift (Opposite shift only is on)',
+    sameShift: 'the students of this batch study in this shift (counselling is only in the opposite shift)',
     campus: 'batch is on the other campus',
-    classGroup: 'batch is a different class group from the teacher (Strict class matching is on)'
+    skipped: 'batch is skipped this week',
+    noStudents: 'batch has no students in the student list'
   };
   const S_WHY = {
+    sameShift: 'study in this shift (counselling is only in the opposite shift)',
+    doneThisWeek: 'already counselled earlier this week',
     bookedElsewhere: 'already booked with another teacher this week',
-    gap: 'counselled too recently (Minimum gap)',
     seatsFull: 'slot was already full'
   };
   // level: ok | warn | fail
   function buildLog(o) {
-    const { tt, settings, recMeta, recIssues, students, plan, planWarnings, moves, result } = o; const L = [];
+    const { tt, settings, students, plan, planWarnings, moves, result, checks } = o; const L = [];
     const add = (step, level, text, detail) => L.push({ step, level, text, detail: detail || [] });
     const pl = (n, w) => `${n} ${w}${n === 1 ? '' : /ch$/.test(w) ? 'es' : 's'}`;
     const kw = S(settings.keyword).toLowerCase();
-    // 1 timetable
     if (!tt) add('Timetable', 'fail', 'No timetable is loaded.');
     else {
       const cells = tt.entries.filter(e => (e.room + ' ' + e.subj).toLowerCase().includes(kw));
       add('Timetable', 'ok', `${pl(tt.teachers.length, 'teacher')} and ${pl(tt.entries.length, 'filled cell')} read. Week starts ${tt.weekStart || '(not found in the file)'}.`, tt.warnings);
-      add('Counselling cells', cells.length ? 'ok' : 'fail', cells.length ? `${pl(cells.length, 'cell')} contain the word "${settings.keyword}", one per counselling slot.` : `No cell contains the word "${settings.keyword}". The planner finds counselling slots by this word. Check the spelling in the timetable or in Set up.`);
-      const off = cells.filter(e => !activeShifts(settings).includes(e.slot));
-      if (off.length) add('Counselling periods', 'warn', `${pl(off.length, 'counselling cell')} fall in periods switched off for counselling and were skipped.`, off.map(e => `${e.t} ${e.day} ${e.slot}`));
+      add('Counselling cells', cells.length ? 'ok' : 'fail', cells.length ? `${pl(cells.length, 'cell')} contain the word "${settings.keyword}", one per counselling slot.` : `No cell contains the word "${settings.keyword}".`);
     }
-    if (!settings.weekStart) add('Week', 'fail', 'No week start date is set.');
-    // 2 students
-    if (!students) add('Student file', 'fail', 'No student file is loaded.');
+    if (!students) add('Student list', 'fail', 'No student list is loaded.');
     else {
       const withH = [...students.values()].filter(s => s.times > 0).length;
-      add('Student file', students.size ? 'ok' : 'fail', `${pl(students.size, 'student')} found; ${withH} have counselling history before this week.`, (recMeta || []).map(m => `Sheet "${m.sheet}": ${m.rows} rows used`));
-      const ri = recIssues || [], nE = ri.filter(i => i.level === 'error').length, nW = ri.filter(i => i.level === 'warn').length;
-      if (ri.length) add('Student file checks', nE ? 'fail' : nW ? 'warn' : 'ok', `${pl(nE, 'row')} not used because of an error, ${pl(nW, 'warning')}.`, ri.slice(0, 200).map(i => `${i.level === 'error' ? 'Error' : i.level === 'warn' ? 'Check' : 'Note'}: ${i.sheet}${i.row ? ' row ' + i.row : ''}: ${i.msg}`).concat(ri.length > 200 ? [`… and ${ri.length - 200} more. Download the checks from Set up.`] : []));
+      add('Student list', 'ok', `${pl(students.size, 'student')} found; ${withH} have been counselled before this week.`);
     }
+    const ch = checks || [], lk = ch.filter(c => c.level === 'lock'), wn = ch.filter(c => c.level === 'warn');
+    if (ch.length) add('Input checks', lk.length ? 'fail' : wn.length ? 'warn' : 'ok', `${pl(lk.length, 'problem')} to fix before planning, ${pl(wn.length, 'warning')}.`, ch.slice(0, 200).map(c => `${c.level === 'lock' ? 'Fix' : 'Check'}: ${c.what}${c.fix ? ' ' + c.fix : ''}`));
     if (!result) { add('Matching', 'fail', 'The schedule has not been calculated yet.'); return L; }
-    // 3 batches: student batch codes must match timetable room codes
-    const sb = result.studentBatches, inTT = sb.filter(b => result.allB.includes(b)), notTT = sb.filter(b => !result.allB.includes(b));
-    const lost = notTT.reduce((a, b) => a + result.byBatchSize[b], 0);
-    add('Batches matched to timetable', !inTT.length ? 'fail' : notTT.length ? 'warn' : 'ok',
-      !inTT.length ? `None of the ${pl(sb.length, 'batch')} in the student file appears in the timetable. The planner learns when a batch is free from the timetable, so no student can be booked. Check that batch codes are written the same way in both files.`
-        : `${inTT.length} of ${pl(sb.length, 'batch')} in the student file appear in the timetable.${notTT.length ? ` ${pl(lost, 'student')} in the other ${notTT.length} can never be booked.` : ''}`,
-      notTT.map(b => `${b} (${pl(result.byBatchSize[b], 'student')}) is not in the timetable`));
-    const noCls = inTT.filter(b => !result.batchCls[b]);
-    if (noCls.length) add('Batch class', 'warn', `${pl(noCls.length, 'batch')} have no class (11th / 12th / Target), because none of their teachers has a class in the teacher list. The "Same class group" rule cannot use them.`, noCls);
-    // teacher batches
-    const tbs = settings.teacherBatches || [];
-    if (tbs.length) {
-      const nT = new Set(tbs.map(x => x.t)).size, inPlan = new Set(plan.map(p => p.t)), used = [...new Set(tbs.map(x => x.t))].filter(t => inPlan.has(t));
-      add('Teacher batches', 'ok', `${tbs.length} teacher–batch pairs for ${nT} teachers; ${used.length} of them counsel this week. ${settings.assignedOnly !== false ? 'They get students only from their assigned batches.' : 'Their assigned batches go first, then the matching rules.'}`);
-    }
-    // 4 slots and cabins
     add('Counselling slots', plan.length ? 'ok' : 'fail', `${pl(plan.length, 'slot')} planned with ${plan.reduce((a, p) => a + p.k, 0)} seats; ${pl(moves.length, 'slot')} moved to a free cabin.`, planWarnings);
-    // 5 rounds
-    const c = result.coverage;
-    if (settings.onceRound !== false) {
-      const due = c.reachable - c.roundDone;
-      add('Rounds', 'ok', `Rounds are counted inside each class group: ${Object.entries(c.byGroup || {}).map(([g, n]) => `${g} round ${n}`).join(', ')}. ${due} of ${c.reachable} reachable students are due this round and go first; others fill seats only when no due student is free.`);
-    }
-    // 6 per slot
-    const booked = result.rows.length, cap = plan.reduce((a, p) => a + p.k, 0);
-    const P = result.passes || [];
-    add('Matching', booked ? (booked < cap ? 'warn' : 'ok') : 'fail', `${booked} of ${cap} seats filled.${P.length ? ` ${P[0].booked} with students due this round who have not met the teacher` + P.slice(1).map(x => `, ${x.booked} with students ${x.tag}`).join('') + '.' : ''}${result.gapSkips ? ` ${result.gapSkips} candidate places skipped by the minimum gap.` : ''}`);
+    const c = result.coverage, B = c.batches || [];
+    add('Rounds', 'ok', `Each batch goes in roll-number order. ${c.reachable - c.roundDone} of ${c.reachable} students are due in their batch's current round and go first.${c.left ? ` ${c.left} marked Left.` : ''}${c.skipped ? ` ${c.skipped} in batches skipped this week.` : ''}`,
+      B.map(b => `${b.batch}: round ${b.round}, ${b.dueBefore} of ${b.students} due, ${b.booked} booked this week${b.dueAfter ? `, ${b.dueAfter} still due after this week` : ', round finished'}${b.counsellors.length ? '' : ' (no teacher counsels this batch)'}`));
+    if (result.dropped && result.dropped.length) add('Kept bookings', 'warn', `${pl(result.dropped.length, 'booking')} taken out because they are no longer valid.`, result.dropped);
+    const booked = result.rows.length, cap = plan.reduce((a, p) => a + p.k, 0), P = result.passes || [];
+    add('Matching', booked ? (booked < cap ? 'warn' : 'ok') : 'fail', `${booked} of ${cap} seats filled.${P.length ? ` ${P[0].booked} with students due this round, ${P[1] ? P[1].booked : 0} from the next round.` : ''}`);
     for (const x of result.slotLog) {
-      const d = [];
-      for (const r of x.rules) d.push(r.skipped ? `Rule "${r.rule}": skipped, ${r.skipped}.` : r.empty ? `Rule "${r.rule}": no batches, ${r.empty}.` : `Rule "${r.rule}": ${pl(r.batches, 'batch')} considered, ${r.open} free and allowed.`);
-      for (const [w, v] of Object.entries(x.batches)) if (w !== 'open') d.push(`${pl(v.batches.length, 'batch')} out (${v.students} students): ${B_WHY[w]}. ${v.batches.slice(0, 12).join(', ')}${v.batches.length > 12 ? ' …' : ''}`);
-      for (const [w, n] of Object.entries(x.students)) if (w !== 'booked') d.push(`${pl(n, 'student')} out: ${S_WHY[w]}.`);
-      // main reason: what removed the most students
+      const d = [`Batches to counsel: ${x.counsel.length ? x.counsel.join(', ') : 'none'}.`];
+      for (const [w, v] of Object.entries(x.batches)) if (w !== 'open') d.push(`${pl(v.batches.length, 'batch')} out (${v.students} students): ${B_WHY[w] || w}. ${v.batches.slice(0, 12).join(', ')}${v.batches.length > 12 ? ' …' : ''}`);
+      for (const [w, n] of Object.entries(x.students)) if (w !== 'booked') d.push(`${pl(n, 'student')} out: ${S_WHY[w] || w}.`);
       const cand = [...Object.entries(x.batches).filter(([w]) => w !== 'open').map(([w, v]) => [B_WHY[w], v.students]), ...Object.entries(x.students).filter(([w]) => w !== 'booked').map(([w, n]) => [S_WHY[w], n])].sort((a, b) => b[1] - a[1]);
-      const onlyA = x.rules.length && x.rules.every(r => r.rule === 'Assigned batches');
-      const main = x.filled >= x.k ? 'full' : onlyA && x.rules[0].empty ? x.rules[0].empty + ' ("Only assigned batches" is on)' : onlyA && !x.rules[0].open ? 'none of the assigned batches is free at this time ("Only assigned batches" is on)' : !x.rules.some(r => r.batches) ? 'no rule gave this teacher any batch' : !Object.keys(x.batches).includes('open') ? `no batch is free at this time (${cand.length ? cand[0][0] : 'none'})` : 'every free student of this class group is already booked in another slot this week';
-      add(`${x.day} ${x.shift} · ${x.t}${x.tClass ? ' (' + x.tClass + ')' : ''}`, x.filled >= x.k ? 'ok' : x.filled ? 'warn' : 'fail', `${x.filled} of ${x.k} seats filled${x.filled >= x.k ? '.' : `. Main reason: ${main}.`}`, d);
+      const main = x.filled >= x.k ? 'full' : x.note ? x.note : !Object.keys(x.batches).includes('open') ? `none of the teacher's batches is free at this time (${cand.length ? cand[0][0] : 'none'})` : 'every free student of the teacher’s batches is already booked or counselled this week';
+      add(`${x.day} ${x.shift} · ${x.t}`, x.filled >= x.k ? 'ok' : x.filled ? 'warn' : 'fail', `${x.filled} of ${x.k} seats filled${x.filled >= x.k ? '.' : `. Main reason: ${main}.`}`, d);
     }
     return L;
   }
   const logText = L => L.map(l => `[${l.level.toUpperCase()}] ${l.step}: ${l.text}` + l.detail.map(d => '\n    - ' + d).join('')).join('\n');
 
-  const api = { DAYS, SLOTS, COUNSEL_SHIFTS, activeShifts, defaultRules, defaultSettings, parseTimetable, parseStudents, buildStudents, buildPlan, finalizePlan, validatePlan, assignStudents, workload, makeCtx, hm, addDays, buildLog, logText, readTemplate, fillTemplate, TEMPLATE, TB, readTeacherBatches, checkTeacherBatches, fillTeacherBatchTemplate, timetableEdits };
+  const api = { DAYS, SLOTS, COUNSEL_SHIFTS, activeShifts, defaultRules, defaultSettings, parseTimetable, parseStudents, buildStudents, buildPlan, finalizePlan, validatePlan, assignStudents, workload, makeCtx, hm, addDays, buildLog, logText, readTemplate, fillTemplate, TEMPLATE, TB, readTeacherBatches, checkTeacherBatches, fillTeacherBatchTemplate, timetableEdits,
+    roomBatches, normShift, nearMatch, readStudentList, buildStudentsV2, fillStudentList, readTeachers, taughtFromTimetable, fillTeachersTemplate, checkInputs, batchTimetable, SL, TS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.MCSEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);
